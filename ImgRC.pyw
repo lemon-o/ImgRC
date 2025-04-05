@@ -1,0 +1,2653 @@
+import tkinter as tk
+from tkinter import filedialog, ttk, messagebox
+from PIL import Image, ImageTk, ImageGrab
+import cv2
+import numpy as np
+import pyautogui
+import time
+import threading
+import logging
+from logging.handlers import RotatingFileHandler
+import os
+import json
+import atexit
+from datetime import datetime
+import shutil
+import keyboard
+import ctypes
+import sys
+from tkinter import ttk
+import pyperclip
+import ttkbootstrap as tb
+from ttkbootstrap.constants import *
+
+
+def run_as_admin():
+    if ctypes.windll.shell32.IsUserAnAdmin():
+        return  # 已经是管理员，直接运行
+
+    # 重新以管理员身份启动
+    exe = sys.executable
+    params = " ".join(sys.argv)
+    ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, params, None, 1)
+    sys.exit()  # 退出当前进程，等待新进程执行
+
+run_as_admin()
+
+class ImageRecognitionApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("ImgRC")
+        # 设置窗口居中显示
+        self.center_window()
+        # 设置窗口图标（相对路径）
+        root.iconbitmap("icon/app.ico") 
+        self.root.geometry("620x600")
+        self.root.resizable(False, False)  # 禁止调整窗口大小
+        # 设置窗口始终在最顶层
+        self.root.wm_attributes("-topmost", 1)
+        # 绑定窗口状态改变事件
+        self.root.bind("<Unmap>", self.on_minimize)   # 最小化时触发
+        self.root.bind("<Map>", self.on_restore)      # 恢复时触发
+        self.style = tb.Style(theme='flatly')  # 选择一个主题
+        self.image_list = []  # 存储 (图像路径, 步骤名称, 相似度, 键盘动作, 坐标(F2), 延时ms, 条件, 需跳转，状态， 需禁用， 鼠标动作)
+        self.screenshot_area = None  # 用于存储截图区域
+        self.rect = None  # 用于存储 Canvas 上的矩形
+        self.start_x = None
+        self.start_y = None
+        self.canvas = None
+        self.running = False  # 控制脚本是否在运行
+        self.thread = None  # 用于保存线程
+        self.hotkey = '<F9>'  # 默认热键
+        self.similarity_threshold = 0.8  # 默认相似度阈值
+        self.delay_time = 0.1  # 默认延迟时间
+        self.loop_count = 1  # 默认循环次数
+        self.screenshot_folder = 'screenshots'  # 截图保存文件夹
+        self.paused = False  # 控制脚本是否暂停
+        self.copied_item = None
+        self.config_filename = 'config.json'  # 默认配置文件名
+        self.start_step_index = 0  # 初始化
+        self.default_photo = None  # 初始化
+        self.from_step = False
+        self.need_retake_screenshot = False
+        self.follow_current_step = tk.BooleanVar(value=False)  # 控制是否跟随当前步骤
+        self.only_keyboard_var = tk.BooleanVar(value=False)  # 控制是否只进行键盘操作
+        self.init_ui()
+        self.tree.image_refs = []  # 初始化 image_refs 属性
+        self.init_logging()
+        self.bind_arrow_keys()
+        self.create_context_menu()
+        atexit.register(self.cleanup_on_exit)
+        self.hotkey_id = None # 初始化热键id
+        self.register_global_hotkey() # 注册全局热键  
+
+    def init_ui(self):
+        # 主框架布局
+        self.main_frame = tb.Frame(self.root)
+        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # 区域L：包含区域A（按钮区域）和区域B（树形区域）垂直排列
+        self.region_l = tb.Frame(self.main_frame)
+        self.region_l.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=5, pady=5)
+
+        # 区域A：按钮区域
+        self.region_a = tb.Frame(self.region_l)
+        self.region_a.pack(fill=tk.X, padx=2, pady=10)
+
+        # 创建第一行框架，用于放置【截取图片】和【删除图片】
+        self.top_button_frame = tb.Frame(self.region_a)
+        self.top_button_frame.pack(pady=5)
+
+        # 截取图片按钮
+        self.screenshot_button = tb.Button(self.top_button_frame, text="截取图片", command=self.prepare_capture_screenshot, bootstyle=PRIMARY)
+        self.screenshot_button.pack(side=tk.LEFT, padx=5)
+
+        # 删除选中图片按钮
+        self.delete_button = tb.Button(self.top_button_frame, text="删除图片", command=self.delete_selected_image, bootstyle=DANGER)
+        self.delete_button.pack(side=tk.LEFT, padx=5)
+
+        # 创建第二行框架，用于放置【加载配置】和【保存配置】
+        self.config_button_frame = tb.Frame(self.region_a)
+        self.config_button_frame.pack(pady=5)
+
+        # 保存配置按钮
+        self.save_config_button = tb.Button(self.config_button_frame, text="保存配置", command=self.save_config, bootstyle=INFO)
+        self.save_config_button.pack(side=tk.LEFT, padx=5)
+
+        # 手动加载配置按钮
+        self.load_config_button = tb.Button(self.config_button_frame, text="加载配置", command=self.load_config_manually, bootstyle=INFO)
+        self.load_config_button.pack(side=tk.LEFT, padx=5)
+
+        # 运行/停止脚本按钮
+        self.toggle_run_button = tb.Button(self.region_a, text="开始运行(F9)", command=self.toggle_script, bootstyle=SUCCESS)
+        self.toggle_run_button.pack(pady=5)
+
+        # 循环次数输入框
+        self.loop_count_label = tb.Label(self.region_a, text="循环次数:")
+        self.loop_count_label.pack(pady=5)
+        self.loop_count_entry = tb.Entry(self.region_a)
+        self.loop_count_entry.insert(0, str(self.loop_count))
+        self.loop_count_entry.pack(pady=5)
+
+        # 默认运行中隐藏
+        self.allow_minimize_var = tk.BooleanVar(value=True)
+        self.follow_current_step = tk.BooleanVar(value=False)
+
+        # 运行中隐藏勾选框
+        self.allow_minimize_checkbox = tb.Checkbutton(
+            self.region_a, 
+            text="运行中隐藏", 
+            variable=self.allow_minimize_var, 
+            bootstyle="toolbutton",
+            command=self.toggle_allow_minimize
+        )
+        self.allow_minimize_checkbox.pack(side=tk.LEFT, pady=5)
+
+        # 跟随步骤勾选框
+        self.follow_step_checkbox = tb.Checkbutton(
+            self.region_a, 
+            text="跟随步骤", 
+            variable=self.follow_current_step, 
+            bootstyle="toolbutton",
+            command=self.toggle_follow_step
+        )
+        self.follow_step_checkbox.pack(side=tk.LEFT, pady=5)
+
+        # 仅键盘操作勾选框
+        self.only_keyboard_checkbox = tb.Checkbutton(self.region_a, text="仅键盘操作", variable=self.only_keyboard_var, bootstyle=TOOLBUTTON)
+        self.only_keyboard_checkbox.pack(side=tk.LEFT, pady=5)
+
+        # 区域B：树形区域
+        self.region_b = tb.Frame(self.region_l)
+        self.region_b.pack(fill=tk.BOTH, expand=True, padx=2, pady=10)
+
+        # 使用 Treeview 来显示图片和延时ms
+        self.tree = ttk.Treeview(self.region_b, columns=(
+            "图片名称", "步骤名称", "相似度", "键盘动作", "坐标(F2)", "延时ms", "条件", "需跳转", "状态", "需禁用", "鼠标动作"
+        ), show='headings')
+        self.tree.heading("图片名称", text="图片名称")
+        self.tree.heading("步骤名称", text="步骤名称")
+        self.tree.heading("相似度", text="相似度")
+        self.tree.heading("键盘动作", text="键盘动作")
+        self.tree.heading("坐标(F2)", text="坐标(F2)")
+        self.tree.heading("延时ms", text="延时ms")
+        self.tree.heading("条件", text="条件")
+        self.tree.heading("需跳转", text="需跳转")
+        self.tree.heading("状态", text="状态")
+        self.tree.heading("需禁用", text="需禁用")
+        self.tree.heading("鼠标动作", text="鼠标动作")
+
+        # 设置列宽和对齐方式（居中）
+        self.tree.column("图片名称", width=75, anchor='center')
+        self.tree.column("步骤名称", width=75, anchor='center')
+        self.tree.column("相似度", width=75, anchor='center')
+        self.tree.column("键盘动作", width=75, anchor='center')
+        self.tree.column("坐标(F2)", width=75, anchor='center')
+        self.tree.column("延时ms", width=75, anchor='center')
+        self.tree.column("条件", width=20, anchor='center')
+        self.tree.column("需跳转", width=75, anchor='center')
+        self.tree.column("状态", width=75, anchor='center')
+        self.tree.column("需禁用", width=75, anchor='center')
+        self.tree.column("鼠标动作", width=75, anchor='center')
+        #显示的列
+        self.tree.configure(displaycolumns=["步骤名称", "延时ms"])
+        #禁用状态的颜色
+        self.tree.tag_configure("disabled", foreground="#ced4da")
+
+        # 将 Treeview 添加到区域B
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # 创建垂直滚动条，并固定在 Treeview 右侧
+        self.scrollbar = ttk.Scrollbar(self.region_b, orient="vertical", command=self.tree.yview)
+        self.scrollbar.pack(side=tk.LEFT, fill=tk.Y)  # 让滚动条紧贴 Treeview
+
+        # 配置 Treeview 使用滚动条
+        self.tree.configure(yscrollcommand=self.scrollbar.set)
+
+        # 创建外部边框区域（使用指定灰色）
+        self.region_r_border = tb.Frame(self.main_frame)
+        self.region_r_border.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=7, pady=15)
+
+        # 内部区域R设置白色背景
+        self.region_r = tb.Frame(
+            self.region_r_border, 
+            bootstyle="light",
+            style="InnerR.TFrame"
+        )
+        self.region_r.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
+
+        # 配置自定义样式
+        style = tb.Style()
+        style.configure("Border.TFrame", background="#ced4da")
+        style.configure("InnerR.TFrame", background="white")
+        style.configure("PreviewBg.TFrame", background="#f8f9fa")
+        style.configure("ImageContainer.TFrame", background="#f8f9fa")
+        self.region_r_border.configure(style="Border.TFrame")
+
+        # 区域C：图片预览区域（取消底部边距）
+        self.region_c = tb.Frame(self.region_r, style="PreviewBg.TFrame")
+        self.region_c.pack(fill=tk.BOTH, padx=10, pady=(10, 0), expand=False)  # 关键修改
+
+        # 预览面板（精确高度控制）
+        self.preview_panel = tb.Frame(
+            self.region_c,
+            width=357,
+            height=236
+        )
+        self.preview_panel.pack_propagate(False)
+        self.preview_panel.pack()  
+
+        # 图像容器（精确高度控制）
+        self.preview_container = tb.Frame(
+            self.preview_panel,
+            width=340,
+            height=240,
+            style="ImageContainer.TFrame"
+        )
+        self.preview_container.pack_propagate(False)
+        self.preview_container.pack(pady=2, padx=2)
+
+        self.preview_image_label = tb.Label(
+            self.preview_container,
+            bootstyle=SECONDARY,
+            anchor="center",
+            background="#f8f9fa"
+        )
+        self.preview_image_label.pack(fill=tk.BOTH, expand=True)
+        self.load_default_image()# 加载默认图片
+
+        # 区域D：紧贴区域C（取消顶部边距）
+        self.region_d = tb.Frame(self.region_r, style="InnerR.TFrame")
+        self.region_d.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))  # 关键修改
+
+        # 详细信息标签区域（保持原样）
+        self.label_frame = tk.Frame(self.region_d, width=350)
+        self.label_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=10)
+        self.label_frame.pack_propagate(False)
+
+        # 标题标签
+        self.label_title = tk.Label(
+            self.label_frame,
+            text="详细信息",
+            anchor="w",
+            font=('Arial', 10, 'bold'),
+            foreground="#3b3b3b"
+        )
+        self.label_title.pack(fill="x", padx=5, pady=7)
+
+        # 详细信息标签
+        self.labels = {
+            "图片名称": tk.Label(self.label_frame, text="图片名称: ", anchor="w"),
+            "相似度": tk.Label(self.label_frame, text="相似度: ", anchor="w"),
+            "坐标(F2)": tk.Label(self.label_frame, text="坐标(F2): ", anchor="w"),
+            "键盘动作": tk.Label(self.label_frame, text="键盘动作: ", anchor="w"),
+            "鼠标动作": tk.Label(self.label_frame, text="鼠标动作: ", anchor="w"),
+            "状态": tk.Label(self.label_frame, text="状态: ", anchor="w"),
+            "条件": tk.Label(self.label_frame, text="条件: ", anchor="w"),
+            "需跳转": tk.Label(self.label_frame, text="需跳转: ", anchor="w"),
+            "需禁用": tk.Label(self.label_frame, text="需禁用: ", anchor="w"),
+        }
+        for lbl in self.labels.values():
+            lbl.configure(foreground="#495057")
+            lbl.pack(fill="x", padx=5, pady=2)
+            
+        # 绑定焦点事件
+        self.tree.bind("<FocusIn>", self.update_label)
+
+        # 绑定 F2 键获取鼠标位置
+        self.root.bind('<F2>', self.get_mouse_position)  
+
+        # 初始化上下文菜单
+        self.tree.unbind('<Double-1>')
+        self.tree.unbind('<Double-3>')
+        self.tree.unbind('<Double-2>')
+
+        # 为上下文菜单添加此绑定
+        self.tree.bind('<Button-3>', self.show_context_menu)  # 右键点击
+        self.tree.bind('<Button-1>', self.on_treeview_select)  # 左键点击
+
+        # 在 Treeview 创建后添加选择事件绑定
+        self.tree.bind('<<TreeviewSelect>>', self.on_treeview_select)
+
+        self.image_dict = {}  # 存储 Treeview 行的图片
+
+        # 绑定鼠标拖动事件
+        self.tree.bind("<ButtonPress-1>", self.on_treeview_drag_start)
+        self.tree.bind("<B1-Motion>", self.on_treeview_drag_motion)
+        self.tree.bind("<ButtonRelease-1>", self.on_treeview_drag_release)
+
+    def center_window(self):
+        """
+        将窗口居中显示
+        """
+        # 获取屏幕宽度和高度
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+
+        # 设置窗口的宽度和高度
+        window_width = 657  # 你可以根据需要调整窗口宽度
+        window_height = 543  # 你可以根据需要调整窗口高度
+
+        # 计算窗口居中的位置
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
+
+        # 设置窗口的位置和大小
+        self.root.geometry(f"{window_width}x{window_height}+{x}+{y}")
+
+    def on_minimize(self, event):
+        self.root.wm_attributes("-topmost", 0)
+
+    def on_restore(self, event):
+        self.root.wm_attributes("-topmost", 1)
+        
+    def load_default_image(self):
+        try:
+            # 基准分辨率和原始最大预览尺寸
+            base_width = 1920
+            base_height = 1080
+            base_max_width = 290
+            base_max_height = 220
+            
+            # 获取当前屏幕分辨率
+            try:
+                current_width = self.winfo_screenwidth()  # 尝试作为Tk窗口获取
+            except AttributeError:
+                current_width = base_width  # 回退到基准值
+            try:
+                current_height = self.winfo_screenheight()
+            except AttributeError:
+                current_height = base_height
+
+            # 计算缩放比例
+            scale = min(current_width / base_width, current_height / base_height)
+            
+            # 调整后的预览尺寸
+            max_width = int(base_max_width * scale)
+            max_height = int(base_max_height * scale)
+
+            # 加载默认图像
+            base_path = os.path.dirname(os.path.abspath(__file__))
+            default_image_path = os.path.join(base_path, "icon", "default_img.png")
+            
+            if os.path.exists(default_image_path):
+                original_image = Image.open(default_image_path)
+                
+                # 获取原始尺寸
+                original_width, original_height = original_image.size
+                
+                # 计算图像缩放比例
+                width_ratio = max_width / original_width
+                height_ratio = max_height / original_height
+                scale_ratio = min(width_ratio, height_ratio)
+                
+                # 计算新的尺寸
+                new_width = int(original_width * scale_ratio)
+                new_height = int(original_height * scale_ratio)
+                
+                # 调整图像大小
+                resized_image = original_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                
+                # 创建 PhotoImage 对象
+                self.default_photo = ImageTk.PhotoImage(resized_image)
+                
+                # 更新预览标签
+                self.preview_image_label.config(image=self.default_photo)
+                self.preview_image_label.image = self.default_photo
+            else:
+                print("默认图片路径不存在:", default_image_path)
+        except Exception as e:
+            print("加载默认图片失败:", e)
+
+    def toggle_allow_minimize(self):
+        if self.allow_minimize_var.get():
+            self.follow_current_step.set(False)
+
+    def toggle_follow_step(self):
+        if self.follow_current_step.get():
+            self.allow_minimize_var.set(False)
+ 
+    def init_logging(self): # 初始化日志
+        handler = RotatingFileHandler('app.log', maxBytes=10*1024*1024, backupCount=5)  # 创建日志文件处理器
+        logging.basicConfig(handlers=[handler], level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s') # 配置日志格式
+
+    def on_treeview_drag_start(self, event):
+        """开始拖动时记录选中的行"""
+        item = self.tree.identify_row(event.y)
+        if item:
+            self.dragged_item = item
+
+    def on_treeview_drag_motion(self, event):
+        """鼠标拖动时高亮目标位置"""
+        if not hasattr(self, "dragged_item"):
+            return
+
+        target_item = self.tree.identify_row(event.y)
+        if target_item and target_item != self.dragged_item:
+            self.tree.selection_set(target_item)  # 选中目标行
+
+    def on_treeview_drag_release(self, event):
+        """释放鼠标时交换行数据和图片，并自动更新预览"""
+        if not hasattr(self, "dragged_item"):
+            return
+
+        target_item = self.tree.identify_row(event.y)
+        if target_item and target_item != self.dragged_item:
+            # 获取行索引
+            dragged_index = self.tree.index(self.dragged_item)
+            target_index = self.tree.index(target_item)
+
+            # 交换文本数据
+            dragged_values = self.tree.item(self.dragged_item, "values")
+            target_values = self.tree.item(target_item, "values")
+            self.tree.item(self.dragged_item, values=target_values)
+            self.tree.item(target_item, values=dragged_values)
+
+            # 交换图片
+            if dragged_index < len(self.image_list) and target_index < len(self.image_list):
+                self.image_list[dragged_index], self.image_list[target_index] = (
+                    self.image_list[target_index],
+                    self.image_list[dragged_index],
+                )
+
+            # 交换 image_dict 的引用
+            if self.dragged_item in self.image_dict and target_item in self.image_dict:
+                self.image_dict[self.dragged_item], self.image_dict[target_item] = (
+                    self.image_dict[target_item],
+                    self.image_dict[self.dragged_item],
+                )
+
+            # **主动更新预览**
+            self.tree.selection_set(target_item)  # 选中拖动目标
+            self.on_treeview_select(None)  # 调用预览方法
+
+        # 清除拖动状态
+        self.dragged_item = None
+
+    def update_label(self, event=None):  # 添加 event=None 以处理带事件和不带事件的调用
+        """更新 Label 显示 Treeview 选中的隐藏列数据"""
+        selected_item = self.tree.selection()
+        if not selected_item:
+            self.clear_labels()
+            return
+        item_values = self.tree.item(selected_item[0], "values")
+        # 显示数据
+        self.labels["图片名称"].config(text=f"图片名称:  {item_values[0]}")
+        self.labels["相似度"].config(text=f"相似度:  {item_values[2]}")
+        self.labels["坐标(F2)"].config(text=f"坐标(F2):  {item_values[4]}")
+        self.labels["键盘动作"].config(text=f"键盘动作:  {item_values[3]}")
+        self.labels["鼠标动作"].config(text=f"鼠标动作:  {item_values[10]}")        
+        self.labels["状态"].config(text=f"状态:  {item_values[8]}")
+        self.labels["条件"].config(text=f"条件:  {item_values[6]}")
+        self.labels["需跳转"].config(text=f"需跳转:  {item_values[7]}")
+        self.labels["需禁用"].config(text=f"需禁用:  {item_values[9]}")
+
+    def clear_labels(self):
+        """清空 Label 内容，仅保留标题"""
+        for key in self.labels:
+            self.labels[key].config(text=f"{key}: ")
+
+    def register_global_hotkey(self):
+        try:
+            def hotkey_callback():
+                self.root.after(0, self.toggle_script)  # 使用 after 在主线程中调用
+             
+            # 解析热键字符串
+            hotkey_str = self.hotkey.replace('<', '').replace('>', '').lower()
+            keyboard.add_hotkey(hotkey_str, hotkey_callback)
+             
+            print(f"全局热键已注册：{self.hotkey}")
+            logging.info(f"全局热键已注册：{self.hotkey}")
+        except Exception as e:
+            print(f"注册热键失败: {e}")
+            logging.error(f"注册热键失败: {e}")
+ 
+    def unregister_global_hotkey(self):
+        try:
+           hotkey_str = self.hotkey.replace('<', '').replace('>', '').lower()
+           keyboard.remove_hotkey(hotkey_str)
+           print(f"全局热键已注销：{self.hotkey}")
+           logging.info(f"全局热键已注销：{self.hotkey}")
+        except Exception as e:
+           print(f"注销全局热键出错：{e}")
+           logging.error(f"注销全局热键出错：{e}")
+ 
+    def prepare_capture_screenshot(self):
+        # 捕获全屏快照
+        screenshot = ImageGrab.grab()  # 全屏捕获
+        self.full_screen_image = screenshot  # 保存原始快照，后续用于局部处理
+        self.screenshot_photo = ImageTk.PhotoImage(screenshot)
+        # 计算新的步骤编号
+        existing_steps = set()
+        for item in self.image_list:
+            step_name = item[1]
+            if step_name.startswith("步骤"):
+                try:
+                    num = int(step_name[2:])  # 提取"步骤"后面的数字
+                    existing_steps.add(num)
+                except ValueError:
+                    continue
+        new_step_num = 1
+        while new_step_num in existing_steps:
+            new_step_num += 1
+        self._next_step_num = new_step_num
+
+        # 创建一个全屏窗口用于显示快照
+        self.top = tk.Toplevel(self.root)
+        self.top.attributes('-fullscreen', True)
+        self.top.focus_force()  # 确保窗口获取焦点
+        self.top.bind("<Escape>", self.exit_screenshot_mode)
+        print("Esc 绑定成功")  # Debug 信息
+
+        # 在窗口上创建 Canvas，并在 Canvas 中显示快照图片
+        self.canvas = tk.Canvas(self.top, cursor="cross")
+        self.canvas.pack(fill=tk.BOTH, expand=True)
+        # 保存创建的图像项标识符，用于后续更新显示
+        self.image_id = self.canvas.create_image(0, 0, anchor=tk.NW, image=self.screenshot_photo)
+
+        # 初始化鼠标拖动相关的属性
+        self.rect = None
+        self.overlay_rects = []
+        
+        # 绑定鼠标事件，用于在快照上选择区域
+        self.canvas.bind("<ButtonPress-1>", self.on_button_press)
+        self.canvas.bind("<B1-Motion>", self.on_mouse_drag)
+        self.canvas.bind("<ButtonRelease-1>", self.on_button_release)
+        
+    def exit_screenshot_mode(self, event=None):
+        """退出截图模式，关闭透明窗口，恢复主窗口"""
+        if hasattr(self, 'top') and self.top:  # 确保 self.top 存在
+            self.top.destroy()
+            self.top = None  # 释放引用，防止重复调用时报错
+        self.root.deiconify()  # 重新显示主窗口
+   
+    def on_button_press(self, event):
+        # 记录起始点坐标
+        self.start_x = event.x
+        self.start_y = event.y
+        # 如果有之前的矩形，删除
+        if self.rect:
+            self.canvas.delete(self.rect)
+        # 删除已有的覆盖层（如果存在）
+        if hasattr(self, 'overlay_rects'):
+            for item in self.overlay_rects:
+                self.canvas.delete(item)
+        # 创建新的矩形框（初始为0尺寸）
+        self.rect = self.canvas.create_rectangle(self.start_x, self.start_y, self.start_x, self.start_y, outline='#0773fc', width=2)
+        # 初始化覆盖层列表
+        self.overlay_rects = []
+
+    def update_overlay(self, x1, y1, x2, y2):
+        # 删除之前的覆盖层
+        for item in self.overlay_rects:
+            self.canvas.delete(item)
+        self.overlay_rects = []
+        # 获取画布的宽度和高度
+        w = self.canvas.winfo_width()
+        h = self.canvas.winfo_height()
+        # 定义选择区域的左上角和右下角
+        left, top = min(x1, x2), min(y1, y2)
+        right, bottom = max(x1, x2), max(y1, y2)
+        
+        # 创建四个覆盖层矩形，使矩形框外区域亮度下降（变暗）
+        # 上面区域
+        self.overlay_rects.append(
+            self.canvas.create_rectangle(0, 0, w, top, fill='black', stipple='gray50', width=0)
+        )
+        # 左侧区域
+        self.overlay_rects.append(
+            self.canvas.create_rectangle(0, top, left, bottom, fill='black', stipple='gray50', width=0)
+        )
+        # 右侧区域
+        self.overlay_rects.append(
+            self.canvas.create_rectangle(right, top, w, bottom, fill='black', stipple='gray50', width=0)
+        )
+        # 底部区域
+        self.overlay_rects.append(
+            self.canvas.create_rectangle(0, bottom, w, h, fill='black', stipple='gray50', width=0)
+        )
+
+    def on_mouse_drag(self, event):
+        # 动态更新矩形框的大小
+        cur_x, cur_y = event.x, event.y
+        self.canvas.coords(self.rect, self.start_x, self.start_y, cur_x, cur_y)
+        # 同步更新覆盖层区域
+        self.update_overlay(self.start_x, self.start_y, cur_x, cur_y)
+
+    def on_button_release(self, event):
+        # 记录终点坐标
+        end_x = event.x
+        end_y = event.y
+
+        # 删除覆盖层，释放画布
+        for item in self.overlay_rects:
+            self.canvas.delete(item)
+        self.overlay_rects = []
+
+        # 获取截图区域，不包括矩形框
+        border_offset = 2  # 让截图区域比矩形框内缩 2 像素
+        bbox = (
+            min(self.start_x, end_x) + border_offset, 
+            min(self.start_y, end_y) + border_offset, 
+            max(self.start_x, end_x) - border_offset, 
+            max(self.start_y, end_y) - border_offset
+        )
+            
+        # 使用规则 "截图（时间）.png" 命名截图文件避免重复
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")  # 生成时间戳
+        screenshot_path = os.path.join(self.screenshot_folder, f"{timestamp}.png")
+
+        # 确保截图文件夹存在
+        os.makedirs(self.screenshot_folder, exist_ok=True)
+
+        # 截图指定区域
+        screenshot = ImageGrab.grab(bbox)
+        screenshot.save(screenshot_path)
+
+        # 计算截图区域的中心坐标
+        center_x = (min(self.start_x, end_x) + max(self.start_x, end_x)) // 2
+        center_y = (min(self.start_y, end_y) + max(self.start_y, end_y)) // 2
+        mouse_click_coordinates = f"{center_x},{center_y}"  # 使用中心坐标
+
+        # 更新图像列表
+        if self.need_retake_screenshot:
+            selected = self.tree.selection()
+            if selected:
+                selected_item = selected[0]
+                selected_index = self.tree.index(selected_item)
+                selected_image = self.image_list[selected_index]  # 获取原始数据
+                insert_index = selected_index
+                
+                # 1. 先删除旧的图片文件（如果存在）
+                old_image_path = selected_image[0]  # 原图片路径
+                try:
+                    if os.path.exists(old_image_path):
+                        os.remove(old_image_path)  # 删除旧图片
+                except Exception as e:
+                    print(f"删除旧图片失败: {e}")
+                
+                # 2. 处理鼠标动作数据
+                if selected_image[4] and ":" in selected_image[4]:  # 如果有现有的鼠标动作数据
+                    parts = selected_image[4].split(":")
+                    action = parts[0]
+                    dynamic = parts[2] if len(parts) > 2 else "0"
+                    count = parts[3] if len(parts) > 3 else "1"
+                    # 重新构建鼠标动作字符串
+                    mouse_action = f"{action}:{center_x},{center_y}:{dynamic}"
+                    if action in ["click", "scrollUp", "scrollDown"]:
+                        mouse_action += f":{count}"
+                else:
+                    # 如果没有鼠标动作数据，使用默认的单击动作
+                    mouse_action = f"click:{center_x},{center_y}:0:1"
+                
+                # 3. 创建更新后的数据元组
+                updated_image = (
+                    screenshot_path,          # 0: 新的图片路径
+                    selected_image[1],       # 1: 步骤名称
+                    selected_image[2],       # 2: 相似度阈值
+                    selected_image[3],       # 3: 键盘动作
+                    mouse_action,            # 4: 更新后的鼠标动作
+                    selected_image[5],       # 5: 等待时间
+                    selected_image[6],       # 6: 条件
+                    selected_image[7],       # 7: 需跳转
+                    selected_image[8],       # 8: 状态
+                    selected_image[9],      # 9: 【需禁用】目标
+                    selected_image[10]      # 10: 鼠标动作
+                )
+                
+                # 4. 更新数据源
+                self.image_list[selected_index] = updated_image
+                self.need_retake_screenshot = False  
+
+        else:
+            selected_item = self.tree.selection()  # 获取当前选中的项
+            step_name = f"步骤{self._next_step_num}"  # 生成递增的步骤名称
+            if selected_item:   
+                selected_index = self.tree.index(selected_item[0])  # 获取选中项的索引
+                insert_index = selected_index + 1  # 在选中项的下一行插入新项目
+                self.image_list.insert(insert_index, (screenshot_path, step_name, 0.8, "", mouse_click_coordinates, 100, "", "", "启用", "", "左键单击 1次"))
+            else:
+                self.image_list.append((screenshot_path, step_name, 0.8, "", mouse_click_coordinates, 100, "", "", "启用", "", "左键单击 1次"))
+        self.update_image_listbox()  # 更新详细信息
+
+        # 关闭全屏透明窗口
+        self.top.destroy()
+        self.root.deiconify()
+
+        # 确保 tree 更新完成后再选择最新项目
+        all_items = self.tree.get_children()
+        if all_items:
+            if selected_item:
+                # 如果是在选中项的下一行插入，则聚焦到新插入的项目
+                last_item = all_items[insert_index]  # 获取新插入的项目
+            else:
+                # 如果没有选中项，则聚焦到最后一个项目
+                last_item = all_items[-1]
+            self.tree.selection_set(last_item)  # 选择该项目
+            self.tree.focus(last_item)  # 聚焦到该项目
+            self.tree.see(last_item)  # 滚动到可见区域
+            print(f"聚焦到项目: {last_item}")
+        else:
+            print("没有可用的项目")
+        self.update_label() # 更新详细信息
+
+    def retake_screenshot(self):
+        self.need_retake_screenshot = True     
+        self.prepare_capture_screenshot()
+   
+    def update_image_listbox(self):
+        try:   
+            # 保存当前预览状态
+            current_preview = None
+            if hasattr(self.preview_image_label, 'image'):
+                current_preview = self.preview_image_label.image
+            
+            # 保存当前选中项的索引和焦点索引
+            selected_indices = [self.tree.index(item) for item in self.tree.selection()]
+            focused_index = self.tree.index(self.tree.focus()) if self.tree.focus() else None
+
+            # 保存现有项目的 tag 状态，假设 tree 项的顺序和 image_list 一致
+            existing_tags = {}
+            for idx, item in enumerate(self.tree.get_children()):
+                existing_tags[idx] = self.tree.item(item, "tags")
+            
+            # 清空旧的列表项
+            for row in self.tree.get_children():
+                self.tree.delete(row)
+
+            # 插入新项，显示图片名称和延时ms
+            for index, item in enumerate(self.image_list):
+                try:
+                    if not item or len(item) < 1:  # 检查项目是否有效
+                        continue
+                    
+                    img_path = item[0]
+                    if not os.path.exists(img_path):
+                        print(f"警告：图像文件不存在 {img_path}")
+                        logging.warning(f"图像文件不存在 {img_path}")
+                        continue
+                    full_item = list(item)
+                    # 确保数据完整，若字段不足则补空字符串
+                    while len(full_item) < 11:
+                        full_item.append("")
+                    
+                    # 解包所有列（包括新增的“状态”列和“需禁用”列）
+                    (
+                        img_path, 
+                        step_name, 
+                        similarity_threshold, 
+                        keyboard_input, 
+                        mouse_click_coordinates, 
+                        wait_time, 
+                        condition, 
+                        jump_to, 
+                        status,
+                        steps_to_disable,
+                        mouse_action_result
+                    ) = full_item
+
+                    # 提取坐标部分
+                    coords = mouse_click_coordinates.split(":")[1] if mouse_click_coordinates and ":" in mouse_click_coordinates else mouse_click_coordinates
+
+                    # 加载图像并创建缩略图
+                    try:
+                        image = Image.open(img_path)
+                        image.thumbnail((50, 50))
+                        photo = ImageTk.PhotoImage(image)
+
+                        # 获取该项之前的 tag 状态，若没有则默认为空元组
+                        tags = existing_tags.get(index, ())
+
+                        # 插入所有数据（包括“状态”列）
+                        self.tree.insert("", tk.END, values=(
+                            os.path.basename(img_path), 
+                            step_name, 
+                            similarity_threshold, 
+                            keyboard_input, 
+                            coords,  # 只显示x,y
+                            wait_time,
+                            condition,
+                            jump_to,
+                            status, 
+                            steps_to_disable,
+                            mouse_action_result
+                        ), image=photo, tags=tags)
+                        self.tree.image_refs.append(photo)  # 保持对图像的引用
+
+                    except Exception as e:
+                        print(f"处理图像时出错 {img_path}: {e}")
+                        logging.error(f"处理图像时出错 {img_path}: {e}")
+
+                except Exception as e:
+                    print(f"处理列表项时出错: {e}")
+                    logging.error(f"处理列表项时出错: {e}")
+
+            # 恢复选择状态（基于索引）
+            children = self.tree.get_children()
+            new_selection = []
+            for idx in selected_indices:
+                if idx < len(children):  # 防止索引越界
+                    new_selection.append(children[idx])
+            if new_selection:
+                self.tree.selection_set(new_selection)
+
+            # 恢复焦点状态（基于索引）
+            if focused_index is not None and focused_index < len(children):
+                self.tree.focus(children[focused_index])
+                self.tree.see(children[focused_index])  # 滚动到焦点项
+
+            # 恢复预览状态
+            if current_preview:
+                self.preview_image_label.config(image=current_preview)
+                self.preview_image_label.image = current_preview    
+            
+        except Exception as e:
+            print(f"更新列表时出错: {e}")
+            logging.error(f"更新列表时出错: {e}")
+        # 在更新列表后如果没有选中项，显示默认图像
+        if not self.tree.selection():
+            self.load_default_image()
+
+    def delete_selected_image(self):
+        try:
+            selected_item = self.tree.selection()
+            if not selected_item:
+                messagebox.showinfo("提示", "请先选择要删除的项目")
+                return
+   
+            selected_index = self.tree.index(selected_item[0])
+            if 0 <= selected_index < len(self.image_list):
+                selected_image = self.image_list[selected_index]
+                img_path = selected_image[0]
+                   
+                # 检查是否正在使用配置文件
+                if hasattr(self, 'config_filename') and os.path.exists(self.config_filename):
+                    # 显示确认对话框
+                    result = messagebox.askyesnocancel(
+                        "确认删除",
+                        f"当正在使用配置文件\n{self.config_filename}\n\n是否删除该步骤并更新配置文件？\n\n选择：\n"
+                        f"是 - 删除步骤并更新配置文件（同时删除图片文件）\n"
+                        f"否 - 仅删除步骤（保留图片文件）\n"
+                        f"取消 - 不执行任何操作"
+                    )
+                       
+                    if result is None:  # 用户点击取消
+                        return
+                       
+                    # 删除图像列表中的项目
+                    del self.image_list[selected_index]
+                       
+                    if result:  # 用户点击是，更新配置文件并删除图片
+                        try:
+                            # 读取现有配置
+                            with open(self.config_filename, 'r') as f:
+                                config = json.load(f)
+                               
+                            # 更新配置中的图像列表
+                            config['image_list'] = self.image_list
+                               
+                            # 保存更新后的配置
+                            with open(self.config_filename, 'w') as f:
+                                json.dump(config, f)
+                                   
+                            # 检查是否有其他项目引用相同的图像文件
+                            is_referenced = any(item[0] == img_path for item in self.image_list)
+                               
+                            # 如果没有其他引用，则删除图像文件
+                            if not is_referenced and os.path.exists(img_path):
+                                try:
+                                    os.remove(img_path)
+                                    print(f"图像文件已删除: {img_path}")
+                                    logging.info(f"图像文件已删除: {img_path}")
+                                except Exception as e:
+                                    print(f"删除图像文件时出错: {e}")
+                                    logging.error(f"删除图像文件时出错: {e}")
+                               
+                            print(f"配置文件已更新: {self.config_filename}")
+                            logging.info(f"配置文件已更新: {self.config_filename}")
+                            messagebox.showinfo("成功", "步骤已删除，配置文件已更新，图片已删除")
+                        except Exception as e:
+                            error_msg = f"更新配置文件时出错: {str(e)}"
+                            print(error_msg)
+                            logging.error(error_msg)
+                            messagebox.showerror("错误", error_msg)
+                    else:  # 用户点击否，仅删除步骤，保留图片
+                        messagebox.showinfo("成功", "步骤已删除（图片文件已保留）")
+                else:
+                    # 如果没有使用配置文件，直接删除步骤和图片
+                    if messagebox.askyesno("确认删除", "是否删除该步骤和对应的图片文件？"):
+                        del self.image_list[selected_index]
+                        # 检查是否有其他项目引用相同的图像文件
+                        is_referenced = any(item[0] == img_path for item in self.image_list)
+                        if not is_referenced and os.path.exists(img_path):
+                            try:
+                                os.remove(img_path)
+                                print(f"图像文件已删除: {img_path}")
+                                logging.info(f"图像文件已删除: {img_path}")
+                            except Exception as e:
+                                print(f"删除图像文件时出错: {e}")
+                                logging.error(f"删除图像文件时出错: {e}")
+                   
+                self.update_image_listbox()
+                self.load_default_image()
+                self.clear_labels()
+
+            else:
+                print("选中的索引超出范围")
+                logging.warning("选中的索引超出范围")
+        except Exception as e:
+            print(f"删除图像时出错: {e}")
+            logging.error(f"删除图像时出错: {e}")
+            self.reset_to_initial_state()
+   
+    def toggle_script(self, event=None):
+        if self.toggle_run_button.cget("text") == "停止运行(F9)":
+            self.stop_script()
+            return
+        
+        if not self.running:
+            if not self.image_list:
+                messagebox.showwarning("提示", "列表中无步骤，请先点击【截取图片】")
+                return  # 直接返回，不执行后续代码
+            if self.from_step:
+                selected_items = self.tree.selection()
+                selected_item = selected_items[0]
+                self.start_step_index = self.tree.index(selected_item)
+                self.from_step = False
+            else:
+                self.start_step_index = 0  
+            self.toggle_run_button.config(text="停止运行(F9)")
+            if self.allow_minimize_var.get():  # 检查勾选框状态
+                self.root.iconify()  # 最小化主窗口
+            else:
+                self.root.lift()  # 确保主窗口在最上层
+                self.root.attributes('-topmost', True)  # 设置为最上层窗口
+            self.start_script_thread()
+
+    def start_script_thread(self):
+        if not self.running:
+            self.running = True
+            self.thread = threading.Thread(target=self.run_script, daemon=True)
+            self.thread.start()
+   
+    def run_script(self):
+        try:
+            self.loop_count = int(self.loop_count_entry.get())
+            if self.loop_count < 0:
+                raise ValueError("循环次数不能为负数")
+        except ValueError as e:
+            messagebox.showerror("输入错误", f"请输入有效的非负整数作为循环次数: {str(e)}")
+            self.running = False
+            self.root.after(0, self.update_ui_after_stop)
+            return
+
+        # 获取所有子项
+        children = self.tree.get_children()
+        # 检查索引是否有效
+        if self.start_step_index < len(children):
+            tree_item = children[self.start_step_index]  # 获取对应的 item ID
+            item_values = self.tree.item(tree_item, 'values')  # 获取该行的值列表
+            step_name = item_values[1] if item_values and len(item_values) > 1 else "未知步骤"
+        else:
+            step_name = "无效步骤索引"
+
+        print(f"开始执行脚本，从步骤 {step_name} 开始，循环次数：{self.loop_count}")
+        logging.info(f"开始执行脚本，从步骤 {step_name} 开始，循环次数：{self.loop_count}")
+
+        # 初始化步骤索引映射，假定步骤名称唯一
+        self.step_index_map = {step[1]: idx for idx, step in enumerate(self.image_list)}
+
+        current_loop = 0
+
+        while self.running and (current_loop < self.loop_count or self.loop_count == 0):
+            if self.paused:
+                time.sleep(0.1)
+                continue
+
+            index = self.start_step_index
+            while index < len(self.image_list) and self.running:
+                # 获取当前 TreeView 项
+                tree_item = self.tree.get_children()[index]
+                item_values = list(self.tree.item(tree_item, 'values'))
+                # 判断当前项是否被禁用（状态存放在索引 8）
+                if self.item_is_disabled(tree_item):
+                    step_name = item_values[1]
+                    print(f"{step_name} 被禁用，跳过执行")
+                    index += 1
+                    continue
+
+                if self.follow_current_step.get():
+                    self.root.after(0, lambda idx=index: self.focus_on_step(idx))
+
+                current_step = self.image_list[index]
+                img_path = current_step[0]
+                img_name = current_step[1]
+                similarity_threshold = current_step[2]
+                keyboard_input = current_step[3]
+                mouse_click_coordinates = current_step[4]
+                wait_time = current_step[5]
+                condition = current_step[6] if len(current_step) > 6 else ""
+                jump_to = current_step[7] if len(current_step) > 7 else ""
+                # 注意：disable_target 与跳转无关，单独判断；假设存储在索引 9
+                disable_target = current_step[9] if len(current_step) > 9 else ""
+
+                # 执行图像匹配或键盘操作
+                if mouse_click_coordinates and not self.only_keyboard_var.get():
+                    match_result = self.match_and_click(img_path, similarity_threshold)
+                elif os.path.exists(img_path):
+                    match_result = self.match_and_click(img_path, similarity_threshold)
+                else:
+                    match_result = True if keyboard_input else False
+
+                # 等待（将毫秒转换为秒）
+                if wait_time > 0:
+                    time.sleep(wait_time / 1000.0)
+
+                # -------------------------------
+                # 单独处理【需禁用】目标步骤（与跳转无关）
+                if disable_target:
+                    if disable_target in self.step_index_map:
+                        target_index = self.step_index_map[disable_target]
+                        target_image = list(self.image_list[target_index])
+                        # 仅在目标项未被禁用时更新
+                        if target_image[8] != "禁用":
+                            target_image[8] = "禁用"
+                            self.image_list[target_index] = tuple(target_image)
+                            # 同步更新 TreeView 显示
+                            target_item = self.tree.get_children()[target_index]
+                            values = list(self.tree.item(target_item, 'values'))
+                            values[8] = "禁用"
+                            self.tree.item(target_item, values=tuple(values))
+                            print(f"{disable_target} 已被禁用")
+                    else:
+                        print(f"需禁用的目标 {disable_target} 不存在")
+                # -------------------------------
+                # 分离处理需跳转
+                if condition and jump_to:
+                    should_jump = False
+                    if condition == "True" and match_result:
+                        should_jump = True
+                        print(f"条件为True且匹配成功，从 {img_name} 跳转到 {jump_to}")
+                    elif condition == "False" and not match_result:
+                        should_jump = True
+                        print(f"条件为False且匹配失败，从 {img_name} 跳转到 {jump_to}")
+
+                    if should_jump:
+                        if jump_to in self.step_index_map:
+                            index = self.step_index_map[jump_to]
+                            continue
+                        else:
+                            print(f"跳转目标 {jump_to} 不存在，停止执行")
+                            self.running = False
+                            break
+
+                # 如果没有跳转且匹配失败，则尝试重试（仅适用于非键盘操作情况）
+                if not match_result and not (condition and jump_to) and not self.only_keyboard_var.get():
+                    match_result = self.retry_until_match(img_path, similarity_threshold, wait_time)
+
+                index += 1
+            current_loop += 1
+        self.restore_disabled_steps()
+        self.running = False
+        self.root.after(0, self.update_ui_after_stop)
+
+    def restore_disabled_steps(self):
+        """
+        遍历 image_list，恢复所有因其他步骤设置【需禁用】而被禁用的目标步骤状态为“启用”，
+        并同步更新 TreeView 显示。
+        """
+        # 收集所有被引用为 disable_target 的步骤名称
+        disable_targets = set()
+        for step in self.image_list:
+            if len(step) > 9 and step[9]:
+                disable_targets.add(step[9])
+        
+        print("需恢复的目标步骤：", disable_targets)
+        
+        # 遍历 image_list，检查那些步骤的名称是否在 disable_targets 内，且当前状态为 "禁用"
+        for idx, step in enumerate(self.image_list):
+            step_name = step[1]
+            if step_name in disable_targets and step[8] == "禁用":
+                updated_step = step[:8] + ("启用", step[9])
+                self.image_list[idx] = updated_step
+                tree_item = self.tree.get_children()[idx]
+                values = list(self.tree.item(tree_item, "values"))
+                values[8] = "启用"
+                self.tree.item(tree_item, values=tuple(values))
+                self.tree.item(tree_item, tags=())
+                print(f"已恢复 {step_name} 的状态为启用")
+
+
+    def retry_until_match(self, img_path, similarity_threshold, wait_time):
+        """
+        重试匹配直到成功或脚本停止
+        """
+        match_result = False
+        while not match_result and self.running:
+            time.sleep(wait_time / 1000.0)
+            if os.path.exists(img_path):
+                match_result = self.match_and_click(img_path, similarity_threshold)
+        return match_result
+   
+    def stop_script(self):
+        if self.thread is not None:
+            # 设置停止标志（如果线程支持）
+            self.running = False
+            
+            # 尝试正常停止
+            self.thread.join(timeout=1)  # 等待1秒
+            
+            if self.thread.is_alive():
+                print("警告：脚本线程未能在1秒内停止，尝试强制终止")
+                logging.warning("脚本线程未能在1秒内停止，尝试强制终止")
+                
+                # 强制终止线程（不推荐，但可用）
+                try:
+                    import ctypes
+                    thread_id = self.thread.ident
+                    res = ctypes.pythonapi.PyThreadState_SetAsyncExc(thread_id, ctypes.py_object(SystemExit))
+                    if res == 0:
+                        raise ValueError("无效的线程ID")
+                    elif res != 1:
+                        ctypes.pythonapi.PyThreadState_SetAsyncExc(thread_id, 0)
+                        raise SystemError("PyThreadState_SetAsyncExc失败")
+                except Exception as e:
+                    print(f"强制终止线程失败: {e}")
+                    logging.error(f"强制终止线程失败: {e}")
+        
+        self.thread = None
+        print("脚本已停止")
+        logging.info("脚本已停止")
+        self.root.attributes('-topmost', False)  # 取消最上层设置
+        self.root.after(0, self.update_ui_after_stop)
+   
+    def update_ui_after_stop(self):
+        self.toggle_run_button.config(text="开始运行(F9)")
+        self.root.deiconify()  # 恢复主窗口
+   
+    def move_item_up(self, event=None):
+        selected_item = self.tree.selection()   
+        if selected_item:
+            selected_index = self.tree.index(selected_item[0])
+            if selected_index > 0:
+                   
+                self.image_list[selected_index], self.image_list[selected_index - 1] = self.image_list[selected_index - 1], self.image_list[selected_index]
+                self.update_image_listbox()
+   
+                   
+                item_id = self.tree.get_children()[selected_index - 1]
+                self.tree.selection_set(item_id)
+                self.tree.focus(item_id)
+   
+    def move_item_down(self, event=None):
+        selected_item = self.tree.selection()
+        if selected_item:
+            selected_index = self.tree.index(selected_item[0])
+            if selected_index < len(self.image_list) - 1:
+                   
+                self.image_list[selected_index], self.image_list[selected_index + 1] = self.image_list[selected_index + 1], self.image_list[selected_index]
+                self.update_image_listbox()          
+                item_id = self.tree.get_children()[selected_index + 1]
+                self.tree.selection_set(item_id)
+                self.tree.focus(item_id)
+   
+    def match_and_click(self, template_path, similarity_threshold): 
+        #图像识别匹配
+        # 获取当前步骤的完整信息
+        selected_index = next((i for i, item in enumerate(self.image_list) if item[0] == template_path), None)
+        if selected_index is not None:
+            current_step = self.image_list[selected_index]
+            mouse_coordinates = current_step[4]  # 获取鼠标坐标
+            keyboard_input = current_step[3]  # 获取键盘输入
+        else:
+            mouse_coordinates = ""
+            keyboard_input = ""
+ 
+        # 获取屏幕截图
+        screenshot = pyautogui.screenshot()
+        screenshot = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
+ 
+        # 读取模板图像
+        template = cv2.imread(template_path)
+ 
+        # 执行模板匹配
+        result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
+        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+ 
+        # 如果相似度超过阈值
+        if max_val >= similarity_threshold:
+            # 先处理鼠标点击、滚轮操作等
+            if mouse_coordinates and not self.only_keyboard_var.get():
+                try:
+                    if ":" in mouse_coordinates:
+                        parts = mouse_coordinates.split(":")
+                        action = parts[0]
+                        coords = parts[1]
+                        is_dynamic = parts[2]
+                        # 对于需要计数的操作（点击、滚轮），解析最后的数字，默认 1
+                        count_val = int(parts[3]) if len(parts) > 3 else 1  
+
+                        # 计算点击或滚动的参考位置
+                        if is_dynamic == "1":
+                            x = max_loc[0] + template.shape[1] // 2
+                            y = max_loc[1] + template.shape[0] // 2
+                        else:
+                            x, y = map(int, coords.split(","))
+
+                        # 执行相应的鼠标操作
+                        if action == "click":
+                            for _ in range(count_val):
+                                pyautogui.click(x, y)
+                        elif action == "rightClick":
+                            pyautogui.moveTo(x, y)
+                            pyautogui.rightClick()
+                        elif action == "doubleClick":
+                            pyautogui.doubleClick(x, y)
+                        elif action == "mouseDown":
+                            pyautogui.mouseDown(x, y)
+                        elif action == "mouseUp":
+                            pyautogui.mouseUp(x, y)
+                        elif action == "scrollUp":
+                            # 移动到坐标后，再执行滚轮操作
+                            pyautogui.moveTo(x, y)
+                            # 循环 count_val 次，每次滚动 70 行（正值表示向上滚动）
+                            for _ in range(count_val):
+                                pyautogui.scroll(70, x=x, y=y)
+                        elif action == "scrollDown":
+                            # 移动到坐标后，再执行滚轮操作
+                            pyautogui.moveTo(x, y)
+                            # 循环 count_val 次，每次滚动 70 行（调用时转换为负值表示向下滚动）
+                            for _ in range(count_val):
+                                pyautogui.scroll(-70, x=x, y=y)
+                    else:
+                        # 处理旧格式的坐标（向后兼容）
+                        x, y = map(int, mouse_coordinates.split(','))
+                        pyautogui.click(x, y)
+                except Exception as e:
+                    print(f"操作执行出错: {e}")
+                    print(f"执行鼠标操作：{mouse_coordinates}")
+                    logging.info(f"执行鼠标操作：{mouse_coordinates}")
+
+                except Exception as e:
+                    print(f"鼠标操作时出错: {e}")
+                    logging.error(f"鼠标操作时出错: {e}")
+                    return False
+                
+            # 再处理键盘动作
+            if keyboard_input:
+                try:
+                    time.sleep(0.5)  # 等待界面响应           
+                    print(f"[DEBUG] 解析输入: {keyboard_input}")
+                    commands = self.parse_keyboard_input(keyboard_input)
+
+                    for cmd in commands:
+                        print(f"[DEBUG] 执行命令: {cmd}")
+                        if isinstance(cmd, tuple) and cmd[0] == "hotkey":
+                            keys = cmd[1]
+                            print(f"[DEBUG] 发送组合键: {keys}")
+                            pyautogui.hotkey(*keys)
+                        elif isinstance(cmd, float):  # 延时
+                            print(f"[DEBUG] 延时 {cmd} 秒")
+                            time.sleep(cmd)
+                        elif isinstance(cmd, tuple) and cmd[0] == "text":  # 纯文本粘贴
+                            print(f"[DEBUG] 纯文本粘贴: {cmd[1]}")
+                            pyperclip.copy(cmd[1])  # 复制到剪贴板
+                            time.sleep(0.1)  # 等待剪贴板更新
+                            pyautogui.hotkey("ctrl", "v")  # 粘贴
+                        else:  # 普通按键
+                            print(f"[DEBUG] 发送按键: {cmd}")
+                            pyautogui.press(cmd)
+
+                        time.sleep(0.1)  # 按键间短暂延时
+
+                    print(f"[INFO] 执行完成: {keyboard_input}")
+                except Exception as e:
+                    print(f"[ERROR] 键盘动作时出错: {e}")
+
+ 
+            return True
+        else:
+            print(f"未找到匹配，最大相似度：{max_val}")
+            logging.info(f"未找到匹配，最大相似度：{max_val}")
+            return False
+   
+    def parse_keyboard_input(self, input_str):
+        """解析键盘动作字符串，返回命令列表（调试版）"""
+        commands = []
+        i = 0
+        buffer = ""  # 用于收集普通文本
+
+        print(f"[DEBUG] 开始解析输入: {input_str}")
+
+        while i < len(input_str):
+            if input_str[i] == '{':
+                # 先把缓冲区的普通文本加入命令列表
+                if buffer:
+                    print(f"[DEBUG] 添加纯文本: {buffer}")
+                    commands.append(("text", buffer))
+                    buffer = ""
+
+                end = input_str.find('}', i)
+                if end != -1:
+                    cmd = input_str[i+1:end]
+                    print(f"[DEBUG] 解析到命令: {cmd}")
+
+                    if cmd.startswith('delay:'):
+                        # 处理延时命令
+                        try:
+                            delay_ms = int(cmd.split(':')[1])
+                            delay_sec = float(delay_ms / 1000)
+                            print(f"[DEBUG] 添加延时: {delay_sec} 秒")
+                            commands.append(delay_sec)
+                        except ValueError:
+                            print(f"[ERROR] 无效的延时值: {cmd}")
+                    elif '+' in cmd:
+                        # 处理组合键
+                        keys = cmd.split('+')
+                        print(f"[DEBUG] 添加组合键: {keys}")
+                        commands.append(("hotkey", tuple(keys)))
+                    else:
+                        # 处理特殊键
+                        print(f"[DEBUG] 添加特殊键: {cmd}")
+                        commands.append(cmd)
+                    i = end + 1
+                    continue
+            else:
+                # 普通字符加入缓冲区
+                buffer += input_str[i]
+            i += 1
+
+        # 处理最后一段普通文本
+        if buffer:
+            print(f"[DEBUG] 添加结尾纯文本: {buffer}")
+            commands.append(("text", buffer))
+
+        print(f"[DEBUG] 最终解析的命令: {commands}")
+        return commands
+
+ 
+    def add_special_key(self, key):
+        current_entry = self.entry.get()
+        self.entry.delete(0, tk.END)
+        self.entry.insert(0, current_entry + key)
+   
+    def edit_keyboard_input(self):
+        selected_items = self.tree.selection()
+        if selected_items:
+            selected_item = selected_items[0]
+            selected_index = self.tree.index(selected_item)
+            selected_image = self.image_list[selected_index]
+ 
+            # 创建新窗口但不隐藏主窗口
+            dialog = tk.Toplevel(self.root)
+            dialog.title("修改键盘动作")
+            dialog.transient(self.root)
+            dialog.grab_set()
+             
+            # 创建输入框和标签
+            input_frame = tk.Frame(dialog)
+            input_frame.pack(fill=tk.X, pady=5)
+            tk.Label(input_frame, text="键盘动作:").pack(side=tk.LEFT)
+            entry = tk.Entry(input_frame, width=30)
+            entry.insert(0, selected_image[3])
+            entry.pack(side=tk.LEFT, padx=5)
+ 
+            # 创建特殊键按钮框架
+            special_keys_frame = tk.LabelFrame(dialog, text="特殊键", padx=5, pady=5)
+            special_keys_frame.pack(fill=tk.X, pady=5)
+   
+            special_keys = [
+                'enter', 'tab', 'space', 'backspace', 'delete',
+                'esc', 'home', 'end', 'pageup', 'pagedown',
+                'up', 'down', 'left', 'right'
+            ]
+   
+            # 创建特殊键按钮
+            for i, key in enumerate(special_keys):
+                btn = tk.Button(special_keys_frame, text=key.upper(),
+                              command=lambda k=key: add_special_key(f"{{{k}}}"))
+                btn.grid(row=i//7, column=i%7, padx=2, pady=2, sticky='ew')
+   
+            # 创建组合键框架
+            combo_keys_frame = tk.LabelFrame(dialog, text="组合键", padx=5, pady=5)
+            combo_keys_frame.pack(fill=tk.X, pady=5)
+   
+            # 创建常用组合键按钮
+            combo_keys = [
+                ('复制', 'ctrl+c'), ('粘贴', 'ctrl+v'), ('剪切', 'ctrl+x'),
+                ('全选', 'ctrl+a'), ('保存', 'ctrl+s'), ('撤销', 'ctrl+z')
+            ]
+   
+            for i, (name, combo) in enumerate(combo_keys):
+                btn = tk.Button(combo_keys_frame, text=name,
+                              command=lambda c=combo: add_special_key(f"{{{c}}}"))
+                btn.grid(row=i//3, column=i%3, padx=2, pady=2, sticky='ew')
+   
+            # 创建修饰键框架
+            modifier_keys_frame = tk.LabelFrame(dialog, text="修饰键", padx=5, pady=5)
+            modifier_keys_frame.pack(fill=tk.X, pady=5)
+   
+            modifier_keys = ['ctrl', 'alt', 'shift', 'win']
+            for i, key in enumerate(modifier_keys):
+                btn = tk.Button(modifier_keys_frame, text=key.upper(),
+                              command=lambda k=key: add_special_key(f"{{{k}}}"))
+                btn.grid(row=0, column=i, padx=2, pady=2, sticky='ew')
+   
+            # 创建功能键框架
+            function_keys_frame = tk.LabelFrame(dialog, text="功能键", padx=5, pady=5)
+            function_keys_frame.pack(fill=tk.X, pady=5)
+   
+            for i in range(12):
+                btn = tk.Button(function_keys_frame, text=f"F{i+1}",
+                              command=lambda k=i+1: add_special_key(f"{{f{k}}}"))
+                btn.grid(row=i//6, column=i%6, padx=2, pady=2, sticky='ew')
+   
+            def add_special_key(key):
+                current_pos = entry.index(tk.INSERT)
+                entry.insert(current_pos, key)
+                entry.focus_set()
+   
+            def save_input():
+                new_keyboard_input = entry.get()
+                self.image_list[selected_index] = (
+                    selected_image[0], selected_image[1], selected_image[2],
+                    new_keyboard_input, selected_image[4], selected_image[5],
+                    selected_image[6], selected_image[7], selected_image[8], selected_image[9], selected_image[10]
+                )
+                self.update_image_listbox()
+                dialog.destroy()
+   
+            # 添加保存和取消按钮
+            button_frame = tk.Frame(dialog)
+            button_frame.pack(fill=tk.X, pady=10)
+
+            tk.Button(button_frame, text="取消", command=lambda: [dialog.destroy(), self.root.deiconify(), self.root.lift()]).pack(side=tk.RIGHT, padx=5)
+            tk.Button(button_frame, text="保存", command=save_input).pack(side=tk.RIGHT)
+    
+            # 居中显示对话框
+            dialog.update_idletasks()
+            x = self.root.winfo_x() + (self.root.winfo_width() - dialog.winfo_width()) // 2
+            y = self.root.winfo_y() + (self.root.winfo_height() - dialog.winfo_height()) // 2
+            dialog.geometry(f"+{x}+{y}")
+   
+    def save_config(self):
+        config = {
+            'hotkey': self.hotkey,
+            'similarity_threshold': self.similarity_threshold,
+            'delay_time': self.delay_time,
+            'loop_count': self.loop_count,
+            'image_list': [img for img in self.image_list if os.path.exists(img[0])],
+            'only_keyboard': self.only_keyboard_var.get(),
+            'screen_resolution': (self.root.winfo_screenwidth(), self.root.winfo_screenheight())  # 记录分辨率
+        }
+        filename = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON files", "*.json")])
+        if filename:
+            try:
+                with open(filename, 'w') as f:
+                    json.dump(config, f)
+                print(f"配置已保存到 {filename}")
+                logging.info(f"配置已保存到 {filename}")
+                self.config_filename = filename
+                with open(self.config_filename, 'w') as f:
+                    json.dump(config, f, indent=4)
+                # 添加成功提示
+                messagebox.showinfo("保存成功", f"配置已成功保存到:\n{filename}")
+            except Exception as e:
+                error_msg = f"保存配置时出错: {str(e)}"
+                print(error_msg)
+                logging.error(error_msg)
+                messagebox.showerror("保存失败", error_msg)
+   
+    def load_config(self):
+        try:
+            if not os.path.exists(self.config_filename):
+                raise FileNotFoundError(f"配置文件不存在: {self.config_filename}")
+   
+            # 先读取配置文件
+            with open(self.config_filename, 'r') as f:
+                config = json.load(f)
+               
+            # 在应用任何更改之前，先验证所有图像文件
+            missing_images = []
+            for img_data in config.get('image_list', []):
+                if not os.path.exists(img_data[0]):
+                    missing_images.append(img_data[0])
+               
+            # 如果有任何图像文件不存在，直接返回，不做任何更改
+            if missing_images:
+                error_message = f"配置文件中缺少以下图像文件: {', '.join(missing_images)}"
+                messagebox.showerror("错误", error_message)
+                logging.error(error_message)
+                return False
+            
+            config_resolution = config.get('screen_resolution', None)
+            current_resolution = (self.root.winfo_screenwidth(), self.root.winfo_screenheight())
+            print (current_resolution)
+            print (config_resolution)
+            if (
+                config_resolution is None
+                or len(config_resolution) != 2
+                or config_resolution[0] != current_resolution[0]
+                or config_resolution[1] != current_resolution[1]
+            ):
+                messagebox.showwarning("分辨率不匹配", "检测到屏幕分辨率与配置不一致，正在调整图片大小...")
+                self.convert_image_size(config_resolution, current_resolution)
+            with open(self.config_filename, 'r') as f:
+                config = json.load(f)                        
+            # 只有当所有图像文件都存在时，才应用配置
+            self.image_list = config.get('image_list', [])
+            self.hotkey = config.get('hotkey', '<F9>')
+            self.similarity_threshold = config.get('similarity_threshold', 0.8)
+            self.delay_time = config.get('delay_time', 0.1)
+            self.loop_count = config.get('loop_count', 1)
+            self.only_keyboard_var.set(config.get('only_keyboard', False))
+ 
+            # 清空并重新填充 Treeview
+            for item in self.tree.get_children():
+                self.tree.delete(item)
+               
+            for img_data in self.image_list:
+                # 确保每个项目都有 11 个元素
+                while len(img_data) < 11:
+                    img_data = img_data + ("",)
+                       
+                # 加载图像并创建缩略图
+                try:
+                    image = Image.open(img_data[0])
+                    image.thumbnail((50, 50))
+                    photo = ImageTk.PhotoImage(image)
+                       
+                    # 插入到 Treeview
+                    tree_item = self.tree.insert("", tk.END, values=(
+                        os.path.basename(img_data[0]),  # 图片名称
+                        img_data[1],  # 步骤名称
+                        img_data[2],  # 相似度
+                        img_data[3],  # 键盘动作
+                        img_data[4],  # 坐标(F2)
+                        img_data[5],  # 延时ms
+                        img_data[6],  # 条件
+                        img_data[7],   # 需跳转
+                        img_data[8],  # 状态
+                        img_data[9],   # 需禁用
+                        img_data[10],   # 鼠标动作
+                    ), image=photo)
+                    self.tree.image_refs.append(photo)
+                    values = self.tree.item(tree_item, "values")
+                    if len(values) > 8 and values[8] == "禁用":
+                        self.tree.item(tree_item, tags=("disabled",))
+                except Exception as e:
+                    print(f"处理图像时出错 {img_data[0]}: {e}")
+                    logging.error(f"处理图像时出错 {img_data[0]}: {e}")
+               
+            # 更新循环次数输入框
+            self.loop_count_entry.delete(0, tk.END)
+            self.loop_count_entry.insert(0, str(self.loop_count))
+               
+             # 取消之前的全局热键， 注册新的全局热键
+            self.unregister_global_hotkey()
+            self.register_global_hotkey()
+            self.update_image_listbox()
+               
+            print(f"配置已从 {self.config_filename} 加载")
+            logging.info(f"配置已从 {self.config_filename} 加载")
+               
+            # 显示成功消息
+            messagebox.showinfo("成功", f"配置已成功加载:\n{self.config_filename}")
+            return True
+               
+        except Exception as e:
+            error_message = f"加载配置时出错: {str(e)}"
+            print(error_message)
+            logging.error(error_message)
+            messagebox.showerror("错误", error_message)
+            return False
+
+    def convert_image_size(self, config_resolution, current_resolution):
+        # 打印输入参数
+        print(f"[DEBUG] 输入参数 - config_resolution: {config_resolution}, current_resolution: {current_resolution}")
+        with open(self.config_filename, 'r') as f:
+            config = json.load(f)        
+        # 根据当前分辨率确定缩放因子
+        if current_resolution == (2560, 1440):
+            scale_factor = 1.25
+            coord_x_scale_factor = 1.25
+            coord_y_scale_factor = 1.16
+        elif current_resolution == (1920, 1080):
+            scale_factor = 1 / 1.25
+            coord_x_scale_factor = 1 / 1.25
+            coord_y_scale_factor = 1 / 1.16
+        else:
+            scale_factor = 1  # 对于其他分辨率，不做尺寸调整
+            coord_x_scale_factor = 1
+            coord_y_scale_factor = 1
+        print(f"[DEBUG] 计算得到的缩放因子: {scale_factor}")
+        self.image_list = config.get('image_list', [])
+        print (self.image_list)
+        print(f"[DEBUG] 将要处理的图像数量: {len(self.image_list)}")
+        
+        for idx, img_data in enumerate(self.image_list):
+            image_path = img_data[0]
+            print(f"[DEBUG] 正在处理第 {idx + 1} 张图像: {image_path}")
+            
+            try:
+                # 打开原始图片
+                image = Image.open(image_path)
+                print(f"[DEBUG] 原始图像尺寸: {image.width}x{image.height}")
+                
+                # 计算新尺寸
+                new_width = int(image.width * scale_factor)
+                new_height = int(image.height * scale_factor)
+                print(f"[DEBUG] 计算后的新尺寸: {new_width}x{new_height}")
+                
+                # 调整图片大小
+                resized_image = image.resize((new_width, new_height), Image.LANCZOS)
+                
+                # 保存调整后的图片，覆盖原文件
+                resized_image.save(image_path)
+                print(f"[DEBUG] 成功调整并保存图像: {image_path}")
+                
+                # 缩放坐标数据（处理字符串格式的坐标 "x,y"）
+                if len(img_data) > 4 and img_data[4]:
+                    mouse_click_coordinates = img_data[4]
+                    original_coords = mouse_click_coordinates.split(":")[1] if mouse_click_coordinates and ":" in mouse_click_coordinates else mouse_click_coordinates
+                    try:
+                        # 分割坐标字符串
+                        x, y = original_coords.split(',')
+                        # 转换为整数并缩放
+                        scaled_x = int(int(x) * coord_x_scale_factor)
+                        scaled_y = int(int(y) * coord_y_scale_factor)
+                        # 重新组合为字符串
+                        scaled_coords = f"{scaled_x},{scaled_y}"
+                        img_data[4] = scaled_coords
+                        print(f"[DEBUG] 坐标已从 {original_coords} 缩放为 {scaled_coords}")
+                        print (img_data)
+                    except Exception as coord_e:
+                        error_msg = f"处理坐标 {original_coords} 时出错: {coord_e}"
+                        print(f"[ERROR] {error_msg}")
+                        logging.error(error_msg)
+                
+                logging.info(f"调整图片 {image_path} 尺寸到 {new_width}x{new_height}，并缩放坐标数据")
+            except Exception as e:
+                error_msg = f"处理图像 {image_path} 时出错: {e}"
+                print(f"[ERROR] {error_msg}")
+                logging.error(error_msg)
+        
+        # 保存修改后的配置（包括缩放后的坐标）
+        with open(self.config_filename, 'w') as f:
+            json.dump(config, f, indent=4)
+        print("[DEBUG] 所有图像处理和坐标缩放完成，配置已更新")
+
+        try:
+            # 1. 读取现有配置文件
+            with open(self.config_filename, 'r') as f:
+                config = json.load(f)
+            
+            # 2. 更新分辨率设置
+            config['screen_resolution'] = current_resolution
+            
+            # 3. 写回配置文件
+            with open(self.config_filename, 'w') as f:
+                json.dump(config, f, indent=4)  # indent 参数使输出格式化更美观
+            
+            print(f"[SUCCESS] 已更新屏幕分辨率为: {current_resolution}")
+            return True
+            
+        except FileNotFoundError:
+            print(f"[ERROR] 配置文件 {self.config_filename} 不存在")
+            return False
+        except json.JSONDecodeError:
+            print(f"[ERROR] 配置文件 {self.config_filename} 格式错误")
+            return False
+        except Exception as e:
+            print(f"[ERROR] 更新分辨率时出错: {str(e)}")
+            return False
+
+    def reset_to_initial_state(self):
+        """重置程序到初始状态"""
+        try:
+            # 重置所有变量到初始值
+            self.hotkey = '<F9>'
+            self.similarity_threshold = 0.8
+            self.delay_time = 0.1
+            self.loop_count = 1
+            self.image_list = []
+            self.running = False
+            self.paused = False
+            self.start_step_index = 0
+            self.only_keyboard_var.set(False)
+               
+            # 重置界面元素
+            self.update_image_listbox()
+            self.loop_count_entry.delete(0, tk.END)
+            self.loop_count_entry.insert(0, str(self.loop_count))
+            self.toggle_run_button.config(text="开始运行(F9)")
+            self.follow_current_step.set(False)
+            self.allow_minimize_var.set(True)
+               
+            print("程序已重置为初始状态")
+            logging.info("程序已重置为初始状态")
+            messagebox.showinfo("重置", "程序已重置为初始状态")
+             
+            #  取消之前的全局热键， 注册新的全局热键
+            self.unregister_global_hotkey()
+            self.register_global_hotkey()
+        except Exception as e:
+            print(f"重置程序状态时出错: {e}")
+            logging.error(f"重置程序状态时出错: {e}")
+   
+    def load_config_manually(self):
+        """手动加载配置文件"""
+        file_path = filedialog.askopenfilename(filetypes=[("JSON files", "*.json")])
+        if file_path:
+            # 保存当前配置文件路径
+            old_config_filename = self.config_filename
+            self.config_filename = file_path
+               
+            # 尝试加载新配置
+            if not self.load_config():
+                # 如果加载失败，恢复原来的配置文件路径
+                self.config_filename = old_config_filename
+   
+    def get_mouse_position(self, event=None):
+        # 获取当前鼠标位置
+        x, y = pyautogui.position()
+        messagebox.showinfo("鼠标位置", f"当前鼠标位置: ({x}, {y})")
+    
+        # 将鼠标位置存储到当前选中的图像中
+        selected_item = self.tree.selection()
+        if selected_item:
+            selected_index = self.tree.index(selected_item[0])
+            selected_image = self.image_list[selected_index]
+            
+            # 保留原有的鼠标动作设置，只更新坐标部分
+            if selected_image[4] and ":" in selected_image[4]:  # 如果有现有的鼠标动作数据
+                parts = selected_image[4].split(":")
+                action = parts[0]
+                dynamic = parts[2] if len(parts) > 2 else "0"
+                count = parts[3] if len(parts) > 3 else "1"
+                # 重新构建鼠标动作字符串
+                mouse_action = f"{action}:{x},{y}:{dynamic}"
+                if action in ["click", "scrollUp", "scrollDown"]:
+                    mouse_action += f":{count}"
+            else:
+                # 如果没有鼠标动作数据，使用默认的单击动作
+                mouse_action = f"click:{x},{y}:0:1"
+            
+            self.image_list[selected_index] = (
+                selected_image[0], selected_image[1], selected_image[2], 
+                selected_image[3], mouse_action, selected_image[5], 
+                selected_image[6], selected_image[7], selected_image[8], selected_image[9], selected_image[10]
+            )
+            self.update_image_listbox()
+   
+    def cleanup_on_exit(self):
+        try:
+            # 退出程序时删除未保存的图像
+            if not os.path.exists(self.config_filename):
+                for item in self.image_list:
+                    img_path = item[0]
+                    if os.path.exists(img_path):
+                        try:
+                            os.remove(img_path)
+                            print(f"图像文件已删除: {img_path}")
+                            logging.info(f"图像文件已删除: {img_path}")
+                        except Exception as e:
+                            print(f"删除图像文件时出错: {e}")
+                            logging.error(f"删除图像文件时出错: {e}")
+            #  取消全局热键
+            self.unregister_global_hotkey()
+        except Exception as e:
+            print(f"清理时出错: {e}")
+            logging.error(f"清理时出错: {e}")
+   
+    def bind_arrow_keys(self):
+        self.tree.bind('<Up>', self.move_item_up)
+        self.tree.bind('<Down>', self.move_item_down)
+   
+    def move_item_up(self, event):
+        selected_items = self.tree.selection()
+        if not selected_items:
+            return
+   
+        for item in selected_items:
+            index = self.tree.index(item)
+            if index > 0:
+                self.tree.move(item, '', index - 1)
+                self.image_list.insert(index - 1, self.image_list.pop(index))
+   
+        # 确保第一个选定项目可见
+        self.tree.see(selected_items[0])
+   
+        # 阻止事件传播
+        return "break"
+   
+    def move_item_down(self, event):
+        selected_items = self.tree.selection()
+        if not selected_items:
+            return
+   
+        for item in reversed(selected_items):
+            index = self.tree.index(item)
+            if index < len(self.image_list) - 1:
+                self.tree.move(item, '', index + 1)
+                self.image_list.insert(index + 1, self.image_list.pop(index))
+   
+        # 确保最后一项可见
+        self.tree.see(selected_items[-1])
+   
+        # 阻止事件传播
+        return "break"
+   
+    def create_context_menu(self):
+        self.context_menu = tk.Menu(self.root, tearoff=0, postcommand=self.update_context_menu)
+        
+        self.context_menu.add_command(label="条件跳转", command=self.set_condition_jump) #索引0
+        self.context_menu.add_command(label="关闭识图", command=self.Image_recognition_click)  # 默认显示为“关闭识图”，索引1
+        self.context_menu.add_command(label="重新截图", command=self.retake_screenshot)
+        self.context_menu.add_separator() #索引3
+
+        self.context_menu.add_command(label="复制", command=self.copy_item)
+        self.context_menu.add_command(label="粘贴", command=self.paste_item)
+        self.context_menu.add_command(label="删除", command=self.delete_selected_image)
+        self.context_menu.add_command(label="禁用", command=self.toggle_disable_status)  # 注意保持为“禁用”，索引7
+        self.context_menu.add_separator()
+
+        self.context_menu.add_command(label="步骤名称", command=self.edit_image_name)
+        self.context_menu.add_command(label="相似度", command=self.edit_similarity_threshold)
+        self.context_menu.add_command(label="键盘动作", command=self.edit_keyboard_input)
+        self.context_menu.add_command(label="鼠标动作", command=self.edit_mouse_action)
+        self.context_menu.add_command(label="延时ms", command=self.edit_wait_time)
+        self.context_menu.add_separator()
+
+        self.context_menu.add_command(label="从此步骤运行", command=self.start_from_step)
+
+    def update_context_menu(self):
+        selected = self.tree.selection()
+        if selected:
+            selected_item = selected[0]
+            values = self.tree.item(selected_item, "values")
+            
+            # 更新识图功能菜单项
+            if values and len(values) > 2:
+                try:
+                    similarity = float(values[2])
+                    new_label = "关闭识图" if similarity > 0 else "开启识图"
+                    new_cmd = self.Normal_click if similarity > 0 else self.Image_recognition_click
+                    self.context_menu.entryconfig(1, label=new_label, command=new_cmd)
+                except ValueError:
+                    print("相似度解析错误")
+            
+            # 更新禁用/启用菜单项（基于“状态”列）
+            disabled = self.item_is_disabled(selected_item)
+            new_disable_label = "启用" if disabled else "禁用"
+            self.context_menu.entryconfig(7, label=new_disable_label, command=self.toggle_disable_status)
+            self.update_label() # 更新详细信息
+
+    def toggle_disable_status(self):
+        selected = self.tree.selection()
+        if selected:
+            selected_item = selected[0]
+            selected_index = self.tree.index(selected_item)
+            selected_image = self.image_list[selected_index]  # 获取原始数据
+
+            # 切换状态（索引8），保持其他字段不变，且【需禁用】（索引9）不变
+            new_status = "禁用" if selected_image[8] != "禁用" else "启用"
+            
+            # 创建新的元组
+            updated_image = (
+                selected_image[0],  # 图片路径
+                selected_image[1],  # 步骤名称
+                selected_image[2],  # 相似度阈值
+                selected_image[3],  # 键盘动作
+                selected_image[4],  # 鼠标点击坐标
+                selected_image[5],  # 等待时间
+                selected_image[6],  # 条件
+                selected_image[7],  # 需跳转
+                new_status,         # 更新状态
+                selected_image[9], # 【需禁用】目标
+                selected_image[10] #鼠标动作
+            )
+
+            # 更新数据源
+            self.image_list[selected_index] = updated_image
+
+            # 更新 TreeView 项（确保显示10个字段，文件名只显示 basename）
+            self.tree.item(selected_item, values=(
+                os.path.basename(updated_image[0]), 
+                updated_image[1],
+                updated_image[2],
+                updated_image[3],
+                updated_image[4],
+                updated_image[5],
+                updated_image[6],
+                updated_image[7],
+                updated_image[8],
+                updated_image[9],
+                updated_image[10],
+            ))
+            self.update_context_menu()
+
+    def item_is_disabled(self, item):
+        values = self.tree.item(item, "values")
+        if len(values) > 8 and values[8] == "禁用":
+            self.tree.item(item, tags=("disabled",))
+            return True
+        else:
+            # 如果项目未禁用，清除标签（如果需要）
+            self.tree.item(item, tags=())
+            return False
+    
+    def toggle_click_label(self):
+        self.update_context_menu()  # 右键菜单更新
+
+    def start_from_step(self):
+        selected_items = self.tree.selection()
+        if not selected_items:
+            messagebox.showwarning("警告", "请先选择一个项目进行操作")
+            return
+        self.from_step = True
+        self.toggle_script()  
+
+    def show_context_menu(self, event):
+        item = self.tree.identify_row(event.y)
+        if item:
+            self.tree.selection_clear()
+            self.tree.selection_set(item)
+            self.tree.focus(item)
+            # 使用after方法延迟显示菜单
+            self.root.after(1, lambda: self.context_menu.post(event.x_root, event.y_root))
+        return "break"
+   
+    def copy_item(self):
+        selected_items = self.tree.selection()
+        if selected_items:
+            index = self.tree.index(selected_items[0])
+            original_item = self.image_list[index]
+               
+            # 创建像文件的副本
+            new_image_path = self.create_image_copy(original_item[0])
+               
+            # 创建新的元组，使用新的图像路径
+            self.copied_item = (new_image_path,) + tuple(original_item[1:])
+   
+    def create_image_copy(self, original_path):
+        # 创建图像文件的副本
+        base_name = os.path.basename(original_path)
+        name, ext = os.path.splitext(base_name)
+        new_name = f"{name}_copy{ext}"
+        new_path = os.path.join(self.screenshot_folder, new_name)
+        shutil.copy2(original_path, new_path)
+        return new_path
+       
+    def paste_item(self):
+        if self.copied_item:
+            target = self.tree.focus()  # 获取当前选中的项目
+            if target:
+                target_index = self.tree.index(target)  # 获取当前项目的索引
+                new_item = list(self.copied_item)  # 复制项目数据（确保是可变列表）
+                self.image_list.insert(target_index + 1, new_item)  # 插入到选中项的下一行
+            else:
+                new_item = list(self.copied_item)
+                self.image_list.append(new_item)  # 如果没有选中项，则添加到末尾
+                
+            self.update_image_listbox()  # 更新详细信息
+     
+            # 获取所有项
+            all_items = self.tree.get_children()
+            if all_items:
+                if target:
+                    last_item = all_items[target_index + 1]  # 获取新插入的项目
+                else:
+                    last_item = all_items[-1]  # 如果没有选中项，则聚焦到最后一个项目
+                
+                self.tree.selection_set(last_item)  # 选择该项目
+                self.tree.focus(last_item)  # 聚焦到该项目
+                self.tree.see(last_item)  # 滚动到可见区域
+                print(f"聚焦到项目: {last_item}")
+            else:
+                print("没有可用的项目")
+            self.update_label() # 更新详细信息
+
+    def edit_similarity_threshold(self):
+        selected_items = self.tree.selection()
+        if selected_items:
+            selected_item = selected_items[0]
+            selected_index = self.tree.index(selected_item)
+            selected_image = self.image_list[selected_index]
+
+            # 创建对话框
+            dialog = tk.Toplevel(self.root)
+            dialog.title("修改相似度")
+            dialog.grab_set()  # 模态对话框
+            dialog.attributes('-topmost', True)  # 让窗口置顶
+
+            # 标签和输入框
+            label = tk.Label(dialog, text="请输入新的相似度（0 - 1.0）：")
+            label.pack(padx=10, pady=10)
+            entry = tk.Entry(dialog)
+            entry.pack(padx=10, pady=10)
+            entry.insert(0, str(selected_image[2]))
+
+            # 保存和取消按钮
+            button_frame = tk.Frame(dialog)
+            button_frame.pack(pady=10)
+
+            def on_save():
+                try:
+                    new_similarity_threshold = float(entry.get())
+                    if not (0 <= new_similarity_threshold <= 1.0):
+                        raise ValueError
+                except ValueError:
+                    messagebox.showerror("错误", "请输入0到1.0之间的有效数值。", parent=dialog)
+                    return
+
+                self.image_list[selected_index] = (
+                    selected_image[0],
+                    selected_image[1],
+                    new_similarity_threshold,
+                    selected_image[3],
+                    selected_image[4],
+                    selected_image[5],
+                    selected_image[6],
+                    selected_image[7],
+                    selected_image[8],
+                    selected_image[9],
+                    selected_image[10]
+                )
+                self.update_image_listbox()
+                dialog.destroy()
+
+            def on_cancel():
+                dialog.destroy()
+
+            save_button = tk.Button(button_frame, text="保存", command=on_save)
+            save_button.pack(side=tk.LEFT, padx=5)
+            cancel_button = tk.Button(button_frame, text="取消", command=on_cancel)
+            cancel_button.pack(side=tk.LEFT, padx=5)
+
+            # 居中对话框
+            self.root.update_idletasks()
+            dialog.update_idletasks()
+            parent_x = self.root.winfo_rootx()
+            parent_y = self.root.winfo_rooty()
+            parent_width = self.root.winfo_width()
+            parent_height = self.root.winfo_height()
+            dialog_width = dialog.winfo_width()
+            dialog_height = dialog.winfo_height()
+            x = parent_x + (parent_width - dialog_width) // 2
+            y = parent_y + (parent_height - dialog_height) // 2
+            dialog.geometry(f'+{x}+{y}')
+
+
+    def edit_wait_time(self):
+        selected_items = self.tree.selection()
+        if selected_items:
+            selected_item = selected_items[0]
+            selected_index = self.tree.index(selected_item)
+            selected_image = self.image_list[selected_index]
+
+            # 创建对话框
+            dialog = tk.Toplevel(self.root)
+            dialog.title("修改延时ms")
+            dialog.grab_set()  # 模态对话框
+            dialog.attributes('-topmost', True)  # 让窗口置顶
+
+            # 标签和输入框
+            label = tk.Label(dialog, text="请输入新的延时ms（毫秒）：")
+            label.pack(padx=10, pady=10)
+            entry = tk.Entry(dialog)
+            entry.pack(padx=10, pady=10)
+            entry.insert(0, str(selected_image[5]))
+
+            # 保存和取消按钮
+            button_frame = tk.Frame(dialog)
+            button_frame.pack(pady=10)
+
+            def on_save():
+                try:
+                    new_wait_time = int(entry.get())
+                except ValueError:
+                    messagebox.showerror("错误", "请输入有效的整数。", parent=dialog)
+                    return
+
+                self.image_list[selected_index] = (
+                    selected_image[0],
+                    selected_image[1],
+                    selected_image[2],
+                    selected_image[3],
+                    selected_image[4],
+                    new_wait_time,
+                    selected_image[6],
+                    selected_image[7],
+                    selected_image[8],
+                    selected_image[9],
+                    selected_image[10]
+                )
+                self.update_image_listbox()
+                dialog.destroy()
+
+            def on_cancel():
+                dialog.destroy()
+
+            save_button = tk.Button(button_frame, text="保存", command=on_save)
+            save_button.pack(side=tk.LEFT, padx=5)
+            cancel_button = tk.Button(button_frame, text="取消", command=on_cancel)
+            cancel_button.pack(side=tk.LEFT, padx=5)
+
+            # 居中对话框
+            self.root.update_idletasks()
+            dialog.update_idletasks()
+            parent_x = self.root.winfo_rootx()
+            parent_y = self.root.winfo_rooty()
+            parent_width = self.root.winfo_width()
+            parent_height = self.root.winfo_height()
+            dialog_width = dialog.winfo_width()
+            dialog_height = dialog.winfo_height()
+            x = parent_x + (parent_width - dialog_width) // 2
+            y = parent_y + (parent_height - dialog_height) // 2
+            dialog.geometry(f'+{x}+{y}')
+
+    def Normal_click(self):
+        selected_items = self.tree.selection()
+        if selected_items:
+            selected_item = selected_items[0]
+            selected_index = self.tree.index(selected_item)
+            selected_image = self.image_list[selected_index]
+            # 直接将相似度设置为 0
+            new_similarity_threshold = 0.0
+            # 更新 selected_image 中的相似度
+            self.image_list[selected_index] = (
+                selected_image[0],  # 图片路径
+                selected_image[1],  # 步骤名称
+                new_similarity_threshold,  # 新的相似度
+                selected_image[3],  # 其他字段保持不变
+                selected_image[4],
+                selected_image[5],
+                selected_image[6],
+                selected_image[7],
+                selected_image[8],
+                selected_image[9],
+                selected_image[10]
+            )
+            # 更新界面显示
+            self.update_image_listbox()
+
+    def Image_recognition_click(self):
+        selected_items = self.tree.selection()
+        if selected_items:
+            selected_item = selected_items[0]
+            selected_index = self.tree.index(selected_item)
+            selected_image = self.image_list[selected_index]
+            # 直接将相似度设置为 0.8
+            new_similarity_threshold = 0.8
+            # 更新 selected_image 中的相似度（修正索引错误）
+            self.image_list[selected_index] = (
+                selected_image[0],  # 图片路径（索引 0）
+                selected_image[1],  # 步骤名称（索引 1）
+                new_similarity_threshold,  # 新的相似度（索引 2）
+                selected_image[3],  # 键盘动作（索引 3）
+                selected_image[4],  # 坐标（索引 4）
+                selected_image[5],  # 延时ms（索引 5）
+                selected_image[6],  # 条件（索引 6，之前遗漏导致后续字段错位）
+                selected_image[7],  # 需跳转（索引 7）
+                selected_image[8],  # 状态（索引 8，必须保留）
+                selected_image[9],   # 需禁用（索引 9，必须保留）
+                selected_image[10] #鼠标动作
+            )
+            
+            # 更新界面显示
+            self.update_image_listbox()
+    
+    def edit_image_name(self):
+        selected_items = self.tree.selection()
+        if selected_items:
+            selected_item = selected_items[0]
+            selected_index = self.tree.index(selected_item)
+            selected_image = self.image_list[selected_index]
+
+            # 创建对话框
+            dialog = tk.Toplevel(self.root)
+            dialog.title("修改步骤名称")
+            dialog.grab_set()  # 设置模态对话框
+            dialog.attributes('-topmost', True)  # 让窗口置顶
+            
+            # 标签和输入框
+            label = tk.Label(dialog, text="请输入新的步骤名称：")
+            label.pack(padx=10, pady=10)
+            entry = tk.Entry(dialog)
+            entry.pack(padx=10, pady=10)
+            entry.insert(0, selected_image[1])
+
+            # 保存和取消按钮
+            button_frame = tk.Frame(dialog)
+            button_frame.pack(pady=10)
+
+            def on_save():
+                new_image_name = entry.get()
+                self.image_list[selected_index] = (
+                    selected_image[0],
+                    new_image_name,
+                    selected_image[2],
+                    selected_image[3],
+                    selected_image[4],
+                    selected_image[5],
+                    selected_image[6],
+                    selected_image[7],
+                    selected_image[8],
+                    selected_image[9],
+                    selected_image[10]
+                )
+                self.update_image_listbox()
+                dialog.destroy()
+
+            def on_cancel():
+                dialog.destroy()
+
+            save_button = tk.Button(button_frame, text="保存", command=on_save)
+            save_button.pack(side=tk.LEFT, padx=5)
+            cancel_button = tk.Button(button_frame, text="取消", command=on_cancel)
+            cancel_button.pack(side=tk.LEFT, padx=5)
+
+            # 居中对话框
+            self.root.update_idletasks()
+            dialog.update_idletasks()
+            parent_x = self.root.winfo_rootx()
+            parent_y = self.root.winfo_rooty()
+            parent_width = self.root.winfo_width()
+            parent_height = self.root.winfo_height()
+            dialog_width = dialog.winfo_width()
+            dialog_height = dialog.winfo_height()
+            x = parent_x + (parent_width - dialog_width) // 2
+            y = parent_y + (parent_height - dialog_height) // 2
+            dialog.geometry(f'+{x}+{y}')
+   
+    def set_condition_jump(self):
+        selected_items = self.tree.selection()
+        if not selected_items:
+            messagebox.showwarning("警告", "请先选择一个项目")
+            return
+
+        selected_item = selected_items[0]
+        selected_index = self.tree.index(selected_item)
+        selected_image = list(self.image_list[selected_index])  # 转换为列表以便修改
+
+        # 创建条件跳转的对话框
+        dialog = tk.Toplevel(self.root)
+        dialog.title("条件跳转")
+        dialog.geometry("270x200")  # 调整高度，容纳新选项
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.attributes('-topmost', True)  # 设置窗口置顶
+
+        # 条件选择
+        condition_frame = tk.Frame(dialog)
+        condition_frame.pack(pady=5)
+        tk.Label(condition_frame, text="条件为:").pack(side=tk.LEFT)
+        condition_var = tk.StringVar(value=selected_image[6] if len(selected_image) > 6 else "")
+        condition_combo = ttk.Combobox(condition_frame, textvariable=condition_var, values=["识图成功", "识图失败", "无"], width=15)
+        condition_combo.pack(side=tk.LEFT)
+
+        # 需跳转选择
+        jump_frame = tk.Frame(dialog)
+        jump_frame.pack(pady=5)
+        tk.Label(jump_frame, text="跳转到:").pack(side=tk.LEFT)
+        jump_var = tk.StringVar(value=selected_image[7] if len(selected_image) > 7 else "")
+        step_names = [img[1] for img in self.image_list]  # 获取所有步骤名称
+        step_names.append("无")  # 添加无选项
+        jump_combo = ttk.Combobox(jump_frame, textvariable=jump_var, values=step_names, width=15)
+        jump_combo.pack(side=tk.LEFT)
+
+        # 需禁用选择
+        disable_frame = tk.Frame(dialog)
+        disable_frame.pack(pady=5)
+        tk.Label(disable_frame, text="需禁用:").pack(side=tk.LEFT)
+        disable_var = tk.StringVar(value=selected_image[9] if len(selected_image) > 9 else "")
+        disable_combo = ttk.Combobox(disable_frame, textvariable=disable_var, values=step_names, width=15)
+        disable_combo.pack(side=tk.LEFT)
+
+        # 保存条件跳转设置
+        def save_condition():
+            condition = condition_var.get()
+            jump_to = jump_var.get()
+            disable_step = disable_var.get()
+
+            # 映射字符串
+            if condition == "无":
+                condition = ""
+            if jump_to == "无":
+                jump_to = ""
+            if disable_step == "无":
+                disable_step = ""
+            if condition == "True":
+                condition = "识图成功"           
+            if condition == "False":
+                condition = "识图失败"   
+
+            # 验证逻辑：如果跳转或禁用目标非空，则条件必须非空
+            if (jump_to != "" or disable_step != "") and condition == "":
+                # 确保弹窗在最上层
+                messagebox.showwarning("警告", "当设置了跳转或禁用目标时，必须指定条件！", parent=dialog)
+                return  # 不继续执行保存操作
+
+            try:
+                # 确保列表长度至少为10
+                while len(selected_image) < 10:
+                    selected_image.append("")
+
+                # 更新条件、需跳转和需禁用目标
+                selected_image[6] = condition
+                selected_image[7] = jump_to
+                # 保持原状态（索引8）不变，更新需禁用目标（索引9）
+                selected_image[9] = disable_step
+
+                # 更新 image_list 中的数据
+                self.image_list[selected_index] = tuple(selected_image)
+
+                # 立即更新显示
+                self.update_image_listbox()
+
+                # 选中更新后的项
+                items = self.tree.get_children()
+                if selected_index < len(items):
+                    self.tree.selection_set(items[selected_index])
+                    self.tree.focus(items[selected_index])
+
+                # 打印日志确认更新
+                print(f"已更新条件跳转设置：条件={condition}, 跳转到={jump_to}, 需禁用={disable_step}")
+                logging.info(f"已更新条件跳转设置：条件={condition}, 跳转到={jump_to}, 需禁用={disable_step}")
+
+            except Exception as e:
+                error_msg = f"保存条件跳转设置时出错: {str(e)}"
+                print(error_msg)
+                logging.error(error_msg)
+                messagebox.showerror("错误", error_msg, parent=dialog)
+            finally:
+                dialog.destroy()
+        # 默认设置三个变量为 "无"
+        condition_var.set("无")  # 默认条件：无
+        jump_var.set("无")      # 默认跳转：无
+        disable_var.set("无")    # 默认禁用：无
+        # 保存按钮
+        btn_frame = tk.Frame(dialog)
+        btn_frame.pack(pady=10)
+        tk.Button(btn_frame, text="保存", command=save_condition).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="取消", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
+
+        # 等待窗口绘制完成
+        dialog.update_idletasks()
+
+        # 计算居中位置
+        x = self.root.winfo_x() + (self.root.winfo_width() - dialog.winfo_width()) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - dialog.winfo_height()) // 2
+
+        # 设置窗口位置
+        dialog.geometry(f"+{x}+{y}")
+   
+    def on_treeview_select(self, event):
+        """当 Treeview 选择改变时更新预览图像"""
+        selected_items = self.tree.selection()
+        if not selected_items:
+            # 加载默认图像
+            self.load_default_image()
+            return
+        selected_item = selected_items[0]
+        selected_index = self.tree.index(selected_item)
+          
+        try:
+            # 获取选中项的图像路径
+            img_path = self.image_list[selected_index][0]
+            
+            # 加载图像
+            original_image = Image.open(img_path)
+            original_width, original_height = original_image.size
+
+            # 通过主窗口获取分辨率
+            root_window = self.root 
+            screen_width = root_window.winfo_screenwidth()
+            screen_height = root_window.winfo_screenheight()
+
+            # 动态设置预览尺寸
+            if screen_width >= 2560 and screen_height >= 1440:
+                max_size = (247, 217)
+            else:
+                max_size = (290, 220)
+            
+            # 保持原有缩放逻辑
+            width_ratio = max_size[0] / original_width
+            height_ratio = max_size[1] / original_height
+            scale_ratio = min(width_ratio, height_ratio)
+            
+            new_size = (
+                int(original_width * scale_ratio),
+                int(original_height * scale_ratio)
+            )
+            
+            resized_image = original_image.resize(new_size, Image.Resampling.LANCZOS)
+            photo = ImageTk.PhotoImage(resized_image)
+            
+            self.preview_image_label.config(image=photo)
+            self.preview_image_label.image = photo
+            self.update_label()
+              
+        except Exception as e:
+            print(f"预览图像时出错: {e}")
+            logging.error(f"预览图像时出错: {e}")
+            self.preview_image_label.config(image='')
+   
+    def edit_mouse_action(self):
+        selected_items = self.tree.selection()
+        if selected_items:
+            selected_item = selected_items[0]
+            selected_index = self.tree.index(selected_item)
+            selected_image = self.image_list[selected_index]
+
+            # 创建新窗口但不隐藏主窗口
+            dialog = tk.Toplevel(self.root)
+            dialog.title("设置鼠标操作")
+            dialog.transient(self.root)
+            dialog.grab_set()
+
+            # 创建坐标输入框
+            coord_frame = tk.Frame(dialog)
+            coord_frame.pack(fill=tk.X, pady=5)
+            tk.Label(coord_frame, text="坐标 (x,y):").pack(side=tk.LEFT)
+            coord_entry = tk.Entry(coord_frame, width=20)
+            coord_entry.pack(side=tk.LEFT, padx=5)
+
+            # 解析现有的鼠标操作数据
+            current_action = "click"
+            current_coords = ""
+            current_dynamic = False
+            current_count = "1"  # 默认次数/滚动行数为1
+
+            if selected_image[4]:  # 如果有现有的鼠标操作数据
+                try:
+                    parts = selected_image[4].split(":")
+                    if len(parts) >= 3:
+                        current_action = parts[0]
+                        current_coords = parts[1]
+                        current_dynamic = parts[2] == "1"
+                        if current_action in ["click", "scrollUp", "scrollDown"] and len(parts) == 4:
+                            current_count = parts[3]
+                    else:
+                        current_coords = selected_image[4]
+                except:
+                    pass
+
+            coord_entry.insert(0, current_coords)
+
+            # 创建鼠标动作选择框架
+            action_frame = tk.LabelFrame(dialog, text="鼠标动作", padx=5, pady=5)
+            action_frame.pack(fill=tk.X, pady=5)
+
+            # 鼠标动作类型
+            action_var = tk.StringVar(value=current_action)
+            actions = [
+                ("左键单击", "click"),
+                ("右键单击", "rightClick"),
+                ("双击", "doubleClick"),
+                ("按住", "mouseDown"),
+                ("释放", "mouseUp")
+            ]
+
+            # 用于存储【左键单击】旁边的循环次数输入框引用
+            left_click_entry = None
+
+            for text, value in actions:
+                if value == "click":
+                    frame = tk.Frame(action_frame)
+                    frame.pack(anchor=tk.W)
+                    tk.Radiobutton(frame, value=value, text=text, variable=action_var).pack(side=tk.LEFT)
+                    left_click_entry = tk.Entry(frame, width=5)
+                    left_click_entry.insert(0, current_count if current_action=="click" else "1")
+                    left_click_entry.pack(side=tk.LEFT, padx=5)
+                    tk.Label(frame, text="次").pack(side=tk.LEFT)
+                else:
+                    tk.Radiobutton(action_frame, text=text, value=value, variable=action_var).pack(anchor=tk.W)
+
+            # 新增滚轮向上操作
+            frame_scroll_up = tk.Frame(action_frame)
+            frame_scroll_up.pack(anchor=tk.W)
+            tk.Radiobutton(frame_scroll_up, value="scrollUp", text="滚轮向上", variable=action_var).pack(side=tk.LEFT)
+            scroll_up_entry = tk.Entry(frame_scroll_up, width=5)
+            scroll_up_entry.insert(0, current_count if current_action=="scrollUp" else "1")
+            scroll_up_entry.pack(side=tk.LEFT, padx=5)
+            tk.Label(frame_scroll_up, text="行").pack(side=tk.LEFT)
+
+            # 新增滚轮向下操作
+            frame_scroll_down = tk.Frame(action_frame)
+            frame_scroll_down.pack(anchor=tk.W)
+            tk.Radiobutton(frame_scroll_down, value="scrollDown", text="滚轮向下", variable=action_var).pack(side=tk.LEFT)
+            scroll_down_entry = tk.Entry(frame_scroll_down, width=5)
+            scroll_down_entry.insert(0, current_count if current_action=="scrollDown" else "1")
+            scroll_down_entry.pack(side=tk.LEFT, padx=5)
+            tk.Label(frame_scroll_down, text="行").pack(side=tk.LEFT)
+
+            # 添加动态点击勾选框
+            dynamic_var = tk.BooleanVar(value=current_dynamic)
+            tk.Checkbutton(action_frame, text="动态点击", variable=dynamic_var).pack(anchor=tk.W)
+
+            def save_mouse_action():
+                try:
+                    # 获取坐标
+                    coords = coord_entry.get().strip()
+                    if not coords or "," not in coords:
+                        messagebox.showerror("错误", "请输入有效的坐标 (x,y)")
+                        return
+
+                    try:
+                        x, y = map(int, coords.split(","))
+                    except ValueError:
+                        messagebox.showerror("错误", "坐标必须是整数")
+                        return
+
+                    action = action_var.get()
+                    dynamic = "1" if dynamic_var.get() else "0"
+
+                    # 获取次数或滚动行数
+                    if action == "click":
+                        count_str = left_click_entry.get().strip() if left_click_entry else "1"
+                    elif action == "scrollUp":
+                        count_str = scroll_up_entry.get().strip()
+                    elif action == "scrollDown":
+                        count_str = scroll_down_entry.get().strip()
+                    else:
+                        count_str = "1"
+
+                    try:
+                        count_val = int(count_str)
+                        if count_val < 1:
+                            raise ValueError
+                    except ValueError:
+                        messagebox.showerror("错误", "请输入有效的次数/行数（正整数）")
+                        return
+
+                    # 生成鼠标操作字符串
+                    if action in ["click", "scrollUp", "scrollDown"]:
+                        mouse_action = f"{action}:{coords}:{dynamic}:{count_val}"
+                    else:
+                        mouse_action = f"{action}:{coords}:{dynamic}"
+                    # 转换鼠标操作字符串
+                    parts = mouse_action.split(":")
+                    if len(parts) < 3:
+                        return mouse_action
+                    action_key = parts[0]  # 动作类型
+                    coords = parts[1]      # 坐标
+                    dynamic_flag = parts[2]  # 是否动态标志
+                    count = parts[3] if len(parts) >= 4 else ""  # 次数/行数
+
+                    # 动作类型到中文描述的映射
+                    action_mapping = {
+                        "click": "左键单击",
+                        "rightClick": "右键单击",
+                        "doubleClick": "双击",
+                        "mouseDown": "按住",
+                        "mouseUp": "释放",
+                        "scrollUp": "向上滚动",
+                        "scrollDown": "向下滚动"
+                    }
+
+                    # 获取动作描述
+                    action_desc = action_mapping.get(action_key, action_key)
+                    # 动态点击描述
+                    dynamic_desc = " 启用动态点击" if dynamic_flag == "1" else ""
+
+                    # 根据动作类型选择单位
+                    unit = "行" if action_key in ["scrollUp", "scrollDown"] else "次"
+
+                    if count:
+                        # 带数量的描述格式
+                        mouse_action_result = f"{action_desc} {count}{unit}{dynamic_desc}"
+                    else:
+                        # 不带数量的描述格式
+                        mouse_action_result = f"{action_desc}{dynamic_desc}"
+
+                    # 更新 image_list
+                    self.image_list[selected_index] = (
+                        selected_image[0], selected_image[1], selected_image[2],
+                        selected_image[3], mouse_action, selected_image[5],
+                        selected_image[6], selected_image[7], selected_image[8], selected_image[9], mouse_action_result
+                    )
+                    self.update_image_listbox()
+
+                    # 关闭对话框
+                    dialog.destroy()
+
+                except Exception as e:
+                    messagebox.showerror("错误", f"保存鼠标操作时出错: {str(e)}")
+ 
+            # 添加保存和取消按钮
+            button_frame = tk.Frame(dialog)
+            button_frame.pack(fill=tk.X, pady=10)
+
+            tk.Button(button_frame, text="取消", command=lambda: [dialog.destroy(), self.root.deiconify(), self.root.lift()]).pack(side=tk.RIGHT, padx=5)
+            tk.Button(button_frame, text="保存", command=save_mouse_action).pack(side=tk.RIGHT)
+
+            # 居中显示对话框
+            dialog.update_idletasks()
+            x = self.root.winfo_x() + (self.root.winfo_width() - dialog.winfo_width()) // 2
+            y = self.root.winfo_y() + (self.root.winfo_height() - dialog.winfo_height()) // 2
+            dialog.geometry(f"+{x}+{y}")
+
+    def focus_on_step(self, index_or_event):
+        """实现跟随步骤功能"""
+        try:
+            # 如果传入的是事件对象，可以根据需要提取索引，或者直接返回
+            if hasattr(index_or_event, 'widget'):
+                # 如果没有办法从事件对象中获取到索引，可以直接返回或进行其它处理
+                return
+            # 如果不是事件对象，那么就将其当作索引处理
+            index = index_or_event
+            items = self.tree.get_children()
+            if 0 <= index < len(items):
+                self.tree.selection_set(items[index])
+                self.tree.focus(items[index])
+                self.tree.see(items[index])
+        except Exception as e:
+            print(f"跟随步骤出错: {e}")
+            logging.error(f"跟随步骤出错: {e}")
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = ImageRecognitionApp(root)
+    root.mainloop()
