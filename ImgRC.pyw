@@ -235,7 +235,7 @@ class ImageRecognitionApp:
         # 运行中隐藏勾选框
         self.allow_minimize_checkbox = tb.Checkbutton(
             self.region_m, 
-            text="运行中隐藏", 
+            text="运行时隐藏", 
             variable=self.allow_minimize_var, 
             bootstyle="toolbutton",
             command=self.toggle_allow_minimize
@@ -644,20 +644,17 @@ class ImageRecognitionApp:
             keyboard.add_hotkey(hotkey_str, hotkey_callback)
              
             print(f"全局热键已注册：{self.hotkey}")
-            logging.info(f"全局热键已注册：{self.hotkey}")
+            logging.info(f"程序启动")
         except Exception as e:
             print(f"注册热键失败: {e}")
-            logging.error(f"注册热键失败: {e}")
  
     def unregister_global_hotkey(self):
         try:
            hotkey_str = self.hotkey.replace('<', '').replace('>', '').lower()
            keyboard.remove_hotkey(hotkey_str)
            print(f"全局热键已注销：{self.hotkey}")
-           logging.info(f"全局热键已注销：{self.hotkey}")
         except Exception as e:
            print(f"注销全局热键出错：{e}")
-           logging.error(f"注销全局热键出错：{e}")
  
     def prepare_capture_screenshot(self):
         # 捕获全屏快照
@@ -1078,7 +1075,6 @@ class ImageRecognitionApp:
         except Exception as e:
             print(f"删除图像时出错: {e}")
             logging.error(f"删除图像时出错: {e}")
-            self.reset_to_initial_state()
    
     def toggle_script(self, event=None):
         if self.toggle_run_button.cget("text") == "停止运行(F9)":
@@ -1682,6 +1678,7 @@ class ImageRecognitionApp:
         button_frame.pack(pady=5)
         tk.Button(button_frame, text="确定", command=on_ok).pack(side=tk.LEFT, padx=10)
         tk.Button(button_frame, text="取消", command=on_cancel).pack(side=tk.RIGHT, padx=10)
+        dialog.iconbitmap("icon/app.ico")  # 设置窗口图标
 
         self.root.wait_window(dialog)
 
@@ -1762,6 +1759,7 @@ class ImageRecognitionApp:
             dialog.geometry(f"{dialog_width}x{dialog_height}+{x}+{y}")
             dialog.transient(self.root)
             dialog.grab_set()
+            dialog.iconbitmap("icon/app.ico")  # 设置窗口图标
 
             # 主容器框架
             main_frame = tk.Frame(dialog)
@@ -1965,6 +1963,7 @@ class ImageRecognitionApp:
             y = main_window_y + (main_window_height - window_height) // 2
             
             export_window.geometry(f"{window_width}x{window_height}+{x}+{y}")
+            export_window.iconbitmap("icon/app.ico")  # 设置窗口图标
 
             # 主容器框架
             main_frame = tk.Frame(export_window)
@@ -2147,10 +2146,8 @@ class ImageRecognitionApp:
         if not selection:
             messagebox.showwarning("警告", "请先选择一个配置文件", parent=dialog)
             return
-        
         config_file = listbox.get(selection[0])
         config_path = os.path.join(working_dir, config_file)
-        
         # 获取关联文件夹名称（假设与配置文件同名但无扩展名）
         folder_name = os.path.splitext(config_file)[0]
         folder_path = os.path.join(self.screenshot_folder, folder_name)
@@ -2160,20 +2157,16 @@ class ImageRecognitionApp:
                                     f"确定要删除以下内容吗？\n配置文件: {config_file}\n关联文件夹: {folder_name}",
                                     parent=dialog)
         if not confirm:
-            return
-        
+            return    
         try:
             # 删除配置文件
             if os.path.exists(config_path):
-                os.remove(config_path)
-            
+                os.remove(config_path)       
             # 删除关联文件夹（如果存在）
             if os.path.exists(folder_path) and os.path.isdir(folder_path):
-                shutil.rmtree(folder_path)
-                
+                shutil.rmtree(folder_path)       
             # 从列表框中移除
-            listbox.delete(selection[0])
-            
+            listbox.delete(selection[0])        
             messagebox.showinfo("成功", "配置及关联文件夹已成功删除", parent=dialog)
         except Exception as e:
             messagebox.showerror("错误", f"删除时出错: {str(e)}", parent=dialog)
@@ -2302,9 +2295,7 @@ class ImageRecognitionApp:
             self.allow_minimize_var.set(True)
                
             print("程序已重置为初始状态")
-            logging.info("程序已重置为初始状态")
-            messagebox.showinfo("重置", "程序已重置为初始状态")
-             
+            logging.info("程序已重置为初始状态")      
             #  取消之前的全局热键， 注册新的全局热键
             self.unregister_global_hotkey()
             self.register_global_hotkey()
@@ -2408,8 +2399,25 @@ class ImageRecognitionApp:
         return "break"
    
     def create_context_menu(self):
-        self.context_menu = tk.Menu(self.root, tearoff=0, postcommand=self.update_context_menu)
-        
+        # 空白处的菜单
+        self.empty_space_menu = tk.Menu(self.root, tearoff=0)
+        self.empty_space_menu.add_command(label="清空列表", command=self.clear_list)
+        self.empty_space_menu.add_separator()
+
+        # 添加置顶/取消置顶菜单项（记住它的位置）
+        self.topmost_var = tk.BooleanVar(value=False)
+        self.topmost_menu_index = 2  # 这是"置顶窗口"菜单项的位置索引（从0开始计数）
+        self.empty_space_menu.add_command(
+            label="窗口置顶", 
+            command=self.toggle_topmost
+        )
+        self.empty_space_menu.add_separator()
+        self.empty_space_menu.add_command(label="保存配置", command=self.save_config)
+        self.empty_space_menu.add_command(label="加载配置", command=self.load_config)
+        self.empty_space_menu.add_separator()
+        self.empty_space_menu.add_command(label="查看日志", command=self.show_logs)
+        # 选中项的菜单
+        self.context_menu = tk.Menu(self.root, tearoff=0, postcommand=self.update_context_menu)   
         self.context_menu.add_command(label="条件跳转", command=self.set_condition_jump) #索引0
         self.context_menu.add_command(label="关闭识图", command=self.Image_recognition_click)  # 默认显示为“关闭识图”，索引1
         self.context_menu.add_command(label="重新截图", command=self.retake_screenshot)
@@ -2430,6 +2438,17 @@ class ImageRecognitionApp:
         self.context_menu.add_separator()
 
         self.context_menu.add_command(label="从此步骤运行", command=self.start_from_step)
+
+    def toggle_topmost(self):
+        """切换窗口置顶状态"""
+        self.topmost_var.set(not self.topmost_var.get())
+        self.root.attributes('-topmost', self.topmost_var.get())
+        
+        # 更新菜单项文字（使用之前存储的索引位置）
+        if self.topmost_var.get():
+            self.empty_space_menu.entryconfigure(self.topmost_menu_index, label="取消置顶")
+        else:
+            self.empty_space_menu.entryconfigure(self.topmost_menu_index, label="窗口置顶")
 
     def update_context_menu(self):
         selected = self.tree.selection()
@@ -2452,7 +2471,7 @@ class ImageRecognitionApp:
             new_disable_label = "启用" if disabled else "禁用"
             self.context_menu.entryconfig(8, label=new_disable_label, command=self.toggle_disable_status)
             self.update_label() # 更新详细信息
-
+    
     def toggle_disable_status(self):
         selected = self.tree.selection()
         if selected:
@@ -2520,14 +2539,22 @@ class ImageRecognitionApp:
 
     def show_context_menu(self, event):
         item = self.tree.identify_row(event.y)
-        if item:
+        
+        if item:  # 点击的是项目
             self.tree.selection_clear()
             self.tree.selection_set(item)
             self.tree.focus(item)
-            # 使用after方法延迟显示菜单
+            self.update_context_menu()  # 更新菜单状态
+            # 使用after确保菜单在选中后显示
             self.root.after(1, lambda: self.context_menu.post(event.x_root, event.y_root))
+        else:  # 点击的是空白处
+            self.empty_space_menu.post(event.x_root, event.y_root)
+        
         return "break"
    
+    def clear_list(self):
+        self.reset_to_initial_state()
+
     def copy_item(self):
         selected_items = self.tree.selection()
         if selected_items:
@@ -3216,6 +3243,67 @@ class ImageRecognitionApp:
         except Exception as e:
             print(f"跟随步骤出错: {e}")
             logging.error(f"跟随步骤出错: {e}")
+
+    def show_logs(self):
+        """显示日志窗口（居中于主窗口）"""
+        log_window = tk.Toplevel(self.root)
+        log_window.title("应用日志")
+        
+        # 设置窗口大小
+        log_width = 700
+        log_height = 500
+        
+        # 获取主窗口位置和尺寸
+        main_x = self.root.winfo_x()
+        main_y = self.root.winfo_y()
+        main_width = self.root.winfo_width()
+        main_height = self.root.winfo_height()
+        
+        # 计算居中位置
+        center_x = main_x + (main_width - log_width) // 2
+        center_y = main_y + (main_height - log_height) // 2
+        
+        # 设置日志窗口位置和大小
+        log_window.geometry(f"{log_width}x{log_height}+{center_x}+{center_y}")
+      
+        # 创建文本框和滚动条
+        text_frame = tk.Frame(log_window)
+        text_frame.pack(fill=tk.BOTH, expand=True)
+        
+        scrollbar = tk.Scrollbar(text_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        log_text = tk.Text(
+            text_frame,
+            wrap=tk.WORD,
+            yscrollcommand=scrollbar.set,
+            font=('Consolas', 10)
+        )
+        log_text.pack(fill=tk.BOTH, expand=True)
+        scrollbar.config(command=log_text.yview)
+        
+        # 读取日志文件内容
+        try:
+            with open('app.log', 'rb') as f:  # 二进制模式
+                content = f.read()
+                try:
+                    log_content = content.decode('utf-8')
+                except UnicodeDecodeError:
+                    log_content = content.decode('gbk', errors='replace')
+            log_text.insert(tk.END, log_content)
+            log_text.see(tk.END)  # 滚动到最后
+        except FileNotFoundError:
+            log_text.insert(tk.END, "日志文件不存在")
+        except Exception as e:
+            log_text.insert(tk.END, f"读取日志失败: {str(e)}")
+        
+        # 禁用文本框编辑
+        log_text.config(state=tk.DISABLED)
+
+        # 确保日志窗口保持在主窗口上方
+        log_window.transient(self.root)
+        log_window.grab_set()
+        log_window.iconbitmap("icon/app.ico")  # 设置窗口图标
 
 if __name__ == "__main__":
     root = tk.Tk()
