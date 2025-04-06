@@ -1,5 +1,7 @@
+import tempfile
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox
+import zipfile
 from PIL import Image, ImageTk, ImageGrab
 import cv2
 import numpy as np
@@ -16,11 +18,11 @@ import shutil
 import keyboard
 import ctypes
 import sys
-from tkinter import ttk
 import pyperclip
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
-
+import ttkbootstrap as ttk
+from ttkbootstrap.tooltip import ToolTip
 
 def run_as_admin():
     if ctypes.windll.shell32.IsUserAnAdmin():
@@ -34,6 +36,18 @@ def run_as_admin():
 
 run_as_admin()
 
+def load_icon(icon_name, size=(18, 18)):
+    # 构建图标完整路径
+    icon_path = os.path.join('icon', icon_name)
+    
+    try:
+        img = Image.open(icon_path).resize(size, Image.Resampling.LANCZOS)
+        return ImageTk.PhotoImage(img)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"图标文件未找到: {icon_path}")
+    except Exception as e:
+        raise Exception(f"加载图标时出错: {str(e)}")
+
 class ImageRecognitionApp:
     def __init__(self, root):
         self.root = root
@@ -41,14 +55,17 @@ class ImageRecognitionApp:
         # 设置窗口居中显示
         self.center_window()
         # 设置窗口图标（相对路径）
-        root.iconbitmap("icon/app.ico") 
-        self.root.geometry("620x600")
+        root.iconbitmap("icon/app.ico")   
+        # 获取屏幕高度
+        screen_height = root.winfo_screenheight()    
+        # 根据屏幕高度设置窗口尺寸
+        if 1080 <= screen_height < 1440:  # 普通高清屏(1080p)
+            self.root.geometry("620x600")
+        elif 1440 <= screen_height < 2160:  # 2K屏
+            self.root.geometry("650x635")
+        else:  # 其他分辨率使用默认尺寸
+            self.root.geometry("620x600")  
         self.root.resizable(False, False)  # 禁止调整窗口大小
-        # 设置窗口始终在最顶层
-        self.root.wm_attributes("-topmost", 1)
-        # 绑定窗口状态改变事件
-        self.root.bind("<Unmap>", self.on_minimize)   # 最小化时触发
-        self.root.bind("<Map>", self.on_restore)      # 恢复时触发
         self.style = tb.Style(theme='flatly')  # 选择一个主题
         self.image_list = []  # 存储 (图像路径, 步骤名称, 相似度, 键盘动作, 坐标(F2), 延时ms, 条件, 需跳转，状态， 需禁用， 鼠标动作)
         self.screenshot_area = None  # 用于存储截图区域
@@ -70,6 +87,7 @@ class ImageRecognitionApp:
         self.default_photo = None  # 初始化
         self.from_step = False
         self.need_retake_screenshot = False
+        self.import_config_success = False
         self.follow_current_step = tk.BooleanVar(value=False)  # 控制是否跟随当前步骤
         self.only_keyboard_var = tk.BooleanVar(value=False)  # 控制是否只进行键盘操作
         self.init_ui()
@@ -92,42 +110,123 @@ class ImageRecognitionApp:
 
         # 区域A：按钮区域
         self.region_a = tb.Frame(self.region_l)
-        self.region_a.pack(fill=tk.X, padx=2, pady=10)
+        self.region_a.pack(fill=tk.X, padx=2, pady=5)
 
-        # 创建第一行框架，用于放置【截取图片】和【删除图片】
-        self.top_button_frame = tb.Frame(self.region_a)
-        self.top_button_frame.pack(pady=5)
+        # 图标缓存
+        self.icons = {
+            "export": load_icon("export.png"),
+            "import": load_icon("import.png"),
+            "save": load_icon("save.png"),
+            "load": load_icon("load.png")
+        }
 
-        # 截取图片按钮
-        self.screenshot_button = tb.Button(self.top_button_frame, text="截取图片", command=self.prepare_capture_screenshot, bootstyle=PRIMARY)
-        self.screenshot_button.pack(side=tk.LEFT, padx=5)
+        self.hover_icons = {
+            "export": load_icon("export_hover.png"),
+            "import": load_icon("import_hover.png"),
+            "save": load_icon("save_hover.png"),
+            "load": load_icon("load_hover.png")
+        }
 
-        # 删除选中图片按钮
-        self.delete_button = tb.Button(self.top_button_frame, text="删除图片", command=self.delete_selected_image, bootstyle=DANGER)
-        self.delete_button.pack(side=tk.LEFT, padx=5)
-
-        # 创建第二行框架，用于放置【加载配置】和【保存配置】
-        self.config_button_frame = tb.Frame(self.region_a)
+        # 用于放置按钮的框架，设置为水平排列
+        self.config_button_frame = ttk.Frame(self.region_a)
         self.config_button_frame.pack(pady=5)
 
-        # 保存配置按钮
-        self.save_config_button = tb.Button(self.config_button_frame, text="保存配置", command=self.save_config, bootstyle=INFO)
-        self.save_config_button.pack(side=tk.LEFT, padx=5)
+        # 定义鼠标进入和离开的回调函数
+        def on_enter(event, button, hover_icon):
+            button.config(image=hover_icon)
 
-        # 手动加载配置按钮
-        self.load_config_button = tb.Button(self.config_button_frame, text="加载配置", command=self.load_config_manually, bootstyle=INFO)
+        def on_leave(event, button, normal_icon):
+            button.config(image=normal_icon)
+
+        # 导出配置按钮
+        self.Export_config_button = ttk.Button(
+            self.config_button_frame, image=self.icons["export"],
+            command=self.export_config, bootstyle="primary-outline"
+        )
+        self.Export_config_button.pack(side=tk.LEFT, padx=5)
+        ToolTip(self.Export_config_button, "导出配置")
+        self.Export_config_button.bind(
+            "<Enter>",
+            lambda e: on_enter(e, self.Export_config_button, self.hover_icons["export"]), add="+"    
+        )
+        self.Export_config_button.bind(
+            "<Leave>",
+            lambda e: on_leave(e, self.Export_config_button, self.icons["export"]), add="+"       
+        )
+
+        # 导入配置按钮
+        self.Import_config_button = ttk.Button(
+            self.config_button_frame, image=self.icons["import"],
+            command=self.import_config, bootstyle="primary-outline"
+        )
+        self.Import_config_button.pack(side=tk.LEFT, padx=5)
+        ToolTip(self.Import_config_button, "导入配置")
+        self.Import_config_button.bind(
+            "<Enter>", 
+            lambda e: on_enter(e, self.Import_config_button, self.hover_icons["import"]), add="+"  
+        )
+        self.Import_config_button.bind(
+            "<Leave>", 
+            lambda e: on_leave(e, self.Import_config_button, self.icons["import"]), add="+"  
+        )
+
+        # 保存配置按钮
+        self.save_config_button = ttk.Button(
+            self.config_button_frame, image=self.icons["save"],
+            command=self.save_config, bootstyle="primary-outline"
+        )
+        self.save_config_button.pack(side=tk.LEFT, padx=5)
+        ToolTip(self.save_config_button, "保存配置")
+        self.save_config_button.bind(
+            "<Enter>", 
+            lambda e: on_enter(e, self.save_config_button, self.hover_icons["save"]), add="+"  
+        )
+        self.save_config_button.bind(
+            "<Leave>", 
+            lambda e: on_leave(e, self.save_config_button, self.icons["save"]), add="+"  
+        )
+
+        # 加载配置按钮
+        self.load_config_button = ttk.Button(
+            self.config_button_frame, image=self.icons["load"],
+            command=self.load_config, bootstyle="primary-outline"
+        )
         self.load_config_button.pack(side=tk.LEFT, padx=5)
+        ToolTip(self.load_config_button, "加载配置")
+        self.load_config_button.bind(
+            "<Enter>", 
+            lambda e: on_enter(e, self.load_config_button, self.hover_icons["load"]), add="+"  
+        )
+        self.load_config_button.bind(
+            "<Leave>", 
+            lambda e: on_leave(e, self.load_config_button, self.icons["load"]), add="+"  
+        )
+
+        # 用于放置【截取图片】和【删除图片】
+        self.top_button_frame = tb.Frame(self.region_a)
+        self.top_button_frame.pack(pady=10)
+
+        # 截取图片按钮
+        self.screenshot_button = tb.Button(self.top_button_frame, text="截取图片", command=self.prepare_capture_screenshot, bootstyle="primary-outline")
+        self.screenshot_button.pack(side=tk.LEFT, padx=5)
 
         # 运行/停止脚本按钮
-        self.toggle_run_button = tb.Button(self.region_a, text="开始运行(F9)", command=self.toggle_script, bootstyle=SUCCESS)
-        self.toggle_run_button.pack(pady=5)
+        self.toggle_run_button = tb.Button(self.top_button_frame, text="开始运行(F9)", command=self.toggle_script, bootstyle="primary-outline")
+        self.toggle_run_button.pack(side=tk.LEFT, padx=5)
 
         # 循环次数输入框
-        self.loop_count_label = tb.Label(self.region_a, text="循环次数:")
-        self.loop_count_label.pack(pady=5)
-        self.loop_count_entry = tb.Entry(self.region_a)
+        self.loop_count_frame = tb.Frame(self.region_a)
+        self.loop_count_frame.pack(pady=5)
+
+        self.loop_count_label = tb.Label(self.loop_count_frame, text="循环次数:")
+        self.loop_count_label.pack(side=tk.LEFT, padx=5)
+        self.loop_count_entry = tb.Entry(self.loop_count_frame)
         self.loop_count_entry.insert(0, str(self.loop_count))
-        self.loop_count_entry.pack(pady=5)
+        self.loop_count_entry.pack(side=tk.LEFT, padx=5)
+
+        # 区域M：勾选框区域
+        self.region_m = tb.Frame(self.region_l)
+        self.region_m.pack(fill=tk.X, padx=2, pady=2)
 
         # 默认运行中隐藏
         self.allow_minimize_var = tk.BooleanVar(value=True)
@@ -135,7 +234,7 @@ class ImageRecognitionApp:
 
         # 运行中隐藏勾选框
         self.allow_minimize_checkbox = tb.Checkbutton(
-            self.region_a, 
+            self.region_m, 
             text="运行中隐藏", 
             variable=self.allow_minimize_var, 
             bootstyle="toolbutton",
@@ -145,7 +244,7 @@ class ImageRecognitionApp:
 
         # 跟随步骤勾选框
         self.follow_step_checkbox = tb.Checkbutton(
-            self.region_a, 
+            self.region_m, 
             text="跟随步骤", 
             variable=self.follow_current_step, 
             bootstyle="toolbutton",
@@ -154,12 +253,12 @@ class ImageRecognitionApp:
         self.follow_step_checkbox.pack(side=tk.LEFT, pady=5)
 
         # 仅键盘操作勾选框
-        self.only_keyboard_checkbox = tb.Checkbutton(self.region_a, text="仅键盘操作", variable=self.only_keyboard_var, bootstyle=TOOLBUTTON)
+        self.only_keyboard_checkbox = tb.Checkbutton(self.region_m, text="仅键盘操作", variable=self.only_keyboard_var, bootstyle=TOOLBUTTON)
         self.only_keyboard_checkbox.pack(side=tk.LEFT, pady=5)
 
         # 区域B：树形区域
         self.region_b = tb.Frame(self.region_l)
-        self.region_b.pack(fill=tk.BOTH, expand=True, padx=2, pady=10)
+        self.region_b.pack(fill=tk.BOTH, expand=True, padx=2, pady=5)
 
         # 使用 Treeview 来显示图片和延时ms
         self.tree = ttk.Treeview(self.region_b, columns=(
@@ -334,12 +433,6 @@ class ImageRecognitionApp:
 
         # 设置窗口的位置和大小
         self.root.geometry(f"{window_width}x{window_height}+{x}+{y}")
-
-    def on_minimize(self, event):
-        self.root.wm_attributes("-topmost", 0)
-
-    def on_restore(self, event):
-        self.root.wm_attributes("-topmost", 1)
         
     def load_default_image(self):
         try:
@@ -367,8 +460,9 @@ class ImageRecognitionApp:
             max_height = int(base_max_height * scale)
 
             # 加载默认图像
-            base_path = os.path.dirname(os.path.abspath(__file__))
-            default_image_path = os.path.join(base_path, "icon", "default_img.png")
+            # 获取当前工作目录
+            working_dir = os.getcwd()
+            default_image_path = os.path.join(working_dir, "icon", "default_img.png")
             
             if os.path.exists(default_image_path):
                 original_image = Image.open(default_image_path)
@@ -460,27 +554,80 @@ class ImageRecognitionApp:
             # **主动更新预览**
             self.tree.selection_set(target_item)  # 选中拖动目标
             self.on_treeview_select(None)  # 调用预览方法
+            self.update_image_listbox()
 
         # 清除拖动状态
         self.dragged_item = None
 
-    def update_label(self, event=None):  # 添加 event=None 以处理带事件和不带事件的调用
-        """更新 Label 显示 Treeview 选中的隐藏列数据"""
-        selected_item = self.tree.selection()
-        if not selected_item:
+    def update_label(self, event=None):
+        """更新 Label 显示 Treeview 选中的隐藏列数据（带可靠的悬停提示功能）"""
+        def 截断文本(文本, 最大长度=37):
+            """辅助函数：当文本超过最大长度时添加省略号"""
+            文本 = str(文本)
+            return 文本[:最大长度-3] + "..." if len(文本) > 最大长度 else 文本
+
+        class 悬停提示管理器:
+            """管理悬停提示的创建和销毁"""
+            def __init__(self):
+                self.当前提示 = None
+
+            def 显示提示(self, 控件, 文本):
+                """显示提示窗口"""
+                self.隐藏提示()  # 先关闭之前的提示
+                self.当前提示 = tk.Toplevel()
+                self.当前提示.wm_overrideredirect(True)
+                x = 控件.winfo_rootx() + 15
+                y = 控件.winfo_rooty() + 控件.winfo_height() + 5
+                self.当前提示.wm_geometry(f"+{x}+{y}")
+                tk.Label(
+                    self.当前提示, 
+                    text=文本, 
+                    bg="#FFFFE0", 
+                    relief="solid", 
+                    borderwidth=1,
+                    padx=5,
+                    pady=2
+                ).pack()
+                
+            def 隐藏提示(self):
+                """隐藏当前提示窗口"""
+                if self.当前提示:
+                    self.当前提示.destroy()
+                    self.当前提示 = None
+
+        # 获取当前选中的项目
+        if not (选中项 := self.tree.selection()):
             self.clear_labels()
             return
-        item_values = self.tree.item(selected_item[0], "values")
-        # 显示数据
-        self.labels["图片名称"].config(text=f"图片名称:  {item_values[0]}")
-        self.labels["相似度"].config(text=f"相似度:  {item_values[2]}")
-        self.labels["坐标(F2)"].config(text=f"坐标(F2):  {item_values[4]}")
-        self.labels["键盘动作"].config(text=f"键盘动作:  {item_values[3]}")
-        self.labels["鼠标动作"].config(text=f"鼠标动作:  {item_values[10]}")        
-        self.labels["状态"].config(text=f"状态:  {item_values[8]}")
-        self.labels["条件"].config(text=f"条件:  {item_values[6]}")
-        self.labels["需跳转"].config(text=f"需跳转:  {item_values[7]}")
-        self.labels["需禁用"].config(text=f"需禁用:  {item_values[9]}")
+        
+        项目值 = self.tree.item(选中项[0], "values")
+        提示管理器 = 悬停提示管理器()  # 创建提示管理器实例
+
+        # 字段配置 (名称: 索引)
+        字段配置 = {
+            "图片名称": 0, "相似度": 2, "坐标(F2)": 4,
+            "键盘动作": 3, "鼠标动作": 10, "状态": 8,
+            "条件": 6, "需跳转": 7, "需禁用": 9
+        }
+
+        for 字段名, 索引 in 字段配置.items():
+            原始值 = str(项目值[索引])
+            显示值 = 截断文本(原始值)
+            标签控件 = self.labels[字段名]
+            
+            标签控件.config(text=f"{字段名}:  {显示值}")
+            标签控件.unbind("<Enter>")  # 移除旧绑定
+            标签控件.unbind("<Leave>")
+
+            if len(原始值) > 37:  # 只为需要截断的文本添加提示
+                标签控件.bind(
+                    "<Enter>", 
+                    lambda e, t=原始值: 提示管理器.显示提示(e.widget, t)
+                )
+                标签控件.bind(
+                    "<Leave>", 
+                    lambda e: 提示管理器.隐藏提示()
+                )
 
     def clear_labels(self):
         """清空 Label 内容，仅保留标题"""
@@ -745,11 +892,6 @@ class ImageRecognitionApp:
             # 保存当前选中项的索引和焦点索引
             selected_indices = [self.tree.index(item) for item in self.tree.selection()]
             focused_index = self.tree.index(self.tree.focus()) if self.tree.focus() else None
-
-            # 保存现有项目的 tag 状态，假设 tree 项的顺序和 image_list 一致
-            existing_tags = {}
-            for idx, item in enumerate(self.tree.get_children()):
-                existing_tags[idx] = self.tree.item(item, "tags")
             
             # 清空旧的列表项
             for row in self.tree.get_children():
@@ -760,7 +902,7 @@ class ImageRecognitionApp:
                 try:
                     if not item or len(item) < 1:  # 检查项目是否有效
                         continue
-                    
+
                     img_path = item[0]
                     if not os.path.exists(img_path):
                         print(f"警告：图像文件不存在 {img_path}")
@@ -770,7 +912,7 @@ class ImageRecognitionApp:
                     # 确保数据完整，若字段不足则补空字符串
                     while len(full_item) < 11:
                         full_item.append("")
-                    
+
                     # 解包所有列（包括新增的“状态”列和“需禁用”列）
                     (
                         img_path, 
@@ -795,11 +937,8 @@ class ImageRecognitionApp:
                         image.thumbnail((50, 50))
                         photo = ImageTk.PhotoImage(image)
 
-                        # 获取该项之前的 tag 状态，若没有则默认为空元组
-                        tags = existing_tags.get(index, ())
-
                         # 插入所有数据（包括“状态”列）
-                        self.tree.insert("", tk.END, values=(
+                        tree_item = self.tree.insert("", tk.END, values=(
                             os.path.basename(img_path), 
                             step_name, 
                             similarity_threshold, 
@@ -811,16 +950,17 @@ class ImageRecognitionApp:
                             status, 
                             steps_to_disable,
                             mouse_action_result
-                        ), image=photo, tags=tags)
+                        ), image=photo)
                         self.tree.image_refs.append(photo)  # 保持对图像的引用
 
+                        # 插入新项后检查status是否为【禁用】
+                        if status == "禁用":
+                            self.tree.item(tree_item, tags=("disabled",))
                     except Exception as e:
-                        print(f"处理图像时出错 {img_path}: {e}")
-                        logging.error(f"处理图像时出错 {img_path}: {e}")
+                        logging.error(f"处理图像 {img_path} 时出错: {e}")
+                except Exception as ex:
+                    logging.error(f"处理列表项时出错: {ex}")
 
-                except Exception as e:
-                    print(f"处理列表项时出错: {e}")
-                    logging.error(f"处理列表项时出错: {e}")
 
             # 恢复选择状态（基于索引）
             children = self.tree.get_children()
@@ -1471,6 +1611,7 @@ class ImageRecognitionApp:
             dialog.geometry(f"+{x}+{y}")
    
     def save_config(self):
+        # 构造配置字典，过滤掉不存在的图片
         config = {
             'hotkey': self.hotkey,
             'similarity_threshold': self.similarity_threshold,
@@ -1478,62 +1619,257 @@ class ImageRecognitionApp:
             'loop_count': self.loop_count,
             'image_list': [img for img in self.image_list if os.path.exists(img[0])],
             'only_keyboard': self.only_keyboard_var.get(),
-            'screen_resolution': (self.root.winfo_screenwidth(), self.root.winfo_screenheight())  # 记录分辨率
+            'screen_resolution': (self.root.winfo_screenwidth(), self.root.winfo_screenheight())
         }
-        filename = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON files", "*.json")])
-        if filename:
-            try:
-                with open(filename, 'w') as f:
-                    json.dump(config, f)
-                print(f"配置已保存到 {filename}")
-                logging.info(f"配置已保存到 {filename}")
-                self.config_filename = filename
-                with open(self.config_filename, 'w') as f:
-                    json.dump(config, f, indent=4)
-                # 添加成功提示
-                messagebox.showinfo("保存成功", f"配置已成功保存到:\n{filename}")
-            except Exception as e:
-                error_msg = f"保存配置时出错: {str(e)}"
-                print(error_msg)
-                logging.error(error_msg)
-                messagebox.showerror("保存失败", error_msg)
+        # 检查图片列表是否为空
+        if not config['image_list']:
+            response = messagebox.askyesno(
+                "警告", 
+                "当前没有可保存的图片步骤，是否继续保存配置？", 
+                parent=self.root
+            )
+            if not response:
+                return  # 用户选择不继续
+
+        # 创建居中对话框获取配置文件名
+        dialog = tk.Toplevel(self.root)
+        dialog.title("保存配置")
+        
+        # 计算居中位置
+        main_window_x = self.root.winfo_x()
+        main_window_y = self.root.winfo_y()
+        main_window_width = self.root.winfo_width()
+        main_window_height = self.root.winfo_height()
+        
+        dialog_width = 300
+        dialog_height = 120
+        
+        x = main_window_x + (main_window_width - dialog_width) // 2
+        y = main_window_y + (main_window_height - dialog_height) // 2
+        
+        dialog.geometry(f"{dialog_width}x{dialog_height}+{x}+{y}")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        tk.Label(dialog, text="保存名称:").pack(padx=10, pady=5)
+        
+        # 创建输入框并设置默认值为当前配置文件名（如果有的话）
+        entry = tk.Entry(dialog, width=30)
+        if hasattr(self, 'config_filename') and self.config_filename:
+            # 只显示文件名，不带路径和扩展名
+            default_name = os.path.splitext(os.path.basename(self.config_filename))[0]
+            entry.insert(0, default_name)
+        entry.pack(padx=10, pady=5)
+        entry.focus_set()
+
+        def on_ok():
+            nonlocal filename
+            filename = entry.get().strip()
+            if not filename:
+                messagebox.showwarning("警告", "请输入配置文件名", parent=dialog)
+                return
+            if not filename.endswith('.json'):
+                filename += '.json'
+            dialog.destroy()
+
+        def on_cancel():
+            nonlocal filename
+            filename = None
+            dialog.destroy()
+
+        filename = None
+        button_frame = tk.Frame(dialog)
+        button_frame.pack(pady=5)
+        tk.Button(button_frame, text="确定", command=on_ok).pack(side=tk.LEFT, padx=10)
+        tk.Button(button_frame, text="取消", command=on_cancel).pack(side=tk.RIGHT, padx=10)
+
+        self.root.wait_window(dialog)
+
+        if not filename:
+            return
+
+        try:
+            # 获取程序工作目录
+            working_dir = os.getcwd()
+            config_path = os.path.join(working_dir, filename)          
+            # 创建 screenshots 文件夹
+            screenshots_dir = self.screenshot_folder
+            os.makedirs(screenshots_dir, exist_ok=True)
+
+            # 创建与配置同名的子文件夹
+            config_basename = os.path.splitext(os.path.basename(filename))[0]
+            new_folder_path = os.path.join(screenshots_dir, config_basename)
+            os.makedirs(new_folder_path, exist_ok=True)
+
+            # 复制图片到新文件夹并更新路径
+            updated_image_list = []
+            for img_data in config['image_list']:
+                old_path = img_data[0]
+                new_path = os.path.join(new_folder_path, os.path.basename(old_path))
+                try:
+                    shutil.copy2(old_path, new_path)
+                    logging.info(f"图片复制成功: {old_path} -> {new_path}")
+                except Exception as copy_err:
+                    logging.error(f"复制图片 {old_path} 时出错: {copy_err}")
+                    new_path = old_path  # 复制失败则保留旧路径
+
+                new_img_data = (new_path,) + tuple(img_data[1:])
+                updated_image_list.append(new_img_data)
+
+            config['image_list'] = updated_image_list
+            
+            # 保存配置文件
+            with open(config_path, 'w') as f:
+                json.dump(config, f, indent=4)
+            self.config_filename = config_path
+            
+            # 简化保存成功提示
+            messagebox.showinfo("保存成功", "配置保存成功！", parent=self.root)
+            
+        except Exception as e:
+            error_msg = f"保存配置时出错: {str(e)}"
+            logging.error(error_msg)
+            messagebox.showerror("保存失败", error_msg, parent=self.root)
    
     def load_config(self):
         try:
+            # 获取程序工作目录
+            working_dir = os.getcwd()
+
+            # 查找所有.json配置文件
+            config_files = [f for f in os.listdir(working_dir) if f.endswith('.json')]
+
+            if not config_files:
+                messagebox.showinfo("提示", "没有找到任何配置文件", parent=self.root)
+                return False
+
+            # 创建居中对话框显示配置文件列表
+            dialog = tk.Toplevel(self.root)
+            dialog.title("选择配置文件")
+            
+            # 计算居中位置
+            main_window_x = self.root.winfo_x()
+            main_window_y = self.root.winfo_y()
+            main_window_width = self.root.winfo_width()
+            main_window_height = self.root.winfo_height()
+            
+            dialog_width = 400
+            dialog_height = 300
+            
+            x = main_window_x + (main_window_width - dialog_width) // 2
+            y = main_window_y + (main_window_height - dialog_height) // 2
+            
+            dialog.geometry(f"{dialog_width}x{dialog_height}+{x}+{y}")
+            dialog.transient(self.root)
+            dialog.grab_set()
+
+            # 主容器框架
+            main_frame = tk.Frame(dialog)
+            main_frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
+
+            # 列表框标题
+            tk.Label(main_frame, text="请选择要加载的配置文件:").pack(anchor=tk.W)
+
+            # 列表框容器
+            list_container = tk.Frame(main_frame)
+            list_container.pack(fill=tk.BOTH, expand=True)
+
+            # 列表框和滚动条
+            listbox = tk.Listbox(list_container, selectmode=tk.SINGLE)
+            scrollbar = tk.Scrollbar(list_container)
+
+            scrollbar.config(command=listbox.yview)
+            listbox.config(yscrollcommand=scrollbar.set)
+
+            for config_file in config_files:
+                listbox.insert(tk.END, config_file)
+
+            # 使用grid布局让列表框和滚动条并排
+            listbox.grid(row=0, column=0, sticky="nsew")
+            scrollbar.grid(row=0, column=1, sticky="ns")
+
+            # 配置grid权重
+            list_container.grid_rowconfigure(0, weight=1)
+            list_container.grid_columnconfigure(0, weight=1)
+
+            # 创建右键菜单
+            context_menu = tk.Menu(dialog, tearoff=0)
+            context_menu.add_command(label="删除配置", command=lambda: self.delete_config(dialog, listbox, working_dir))
+            
+            # 绑定右键事件
+            def show_context_menu(event):
+                if listbox.curselection():
+                    context_menu.post(event.x_root, event.y_root)
+                    
+            listbox.bind("<Button-3>", show_context_menu)
+
+            # 按钮框架 - 放在列表框下方
+            button_frame = tk.Frame(main_frame)
+            button_frame.pack(pady=(10, 0))
+            # 按钮定义
+            def on_ok():
+                selection = listbox.curselection()
+                if not selection:
+                    messagebox.showwarning("警告", "请选择一个配置文件", parent=dialog)
+                    return
+                global selected_config
+                selected_config = config_files[selection[0]]
+                dialog.destroy()
+
+            def on_cancel():
+                global selected_config
+                selected_config = None
+                dialog.destroy()
+
+            # 添加按钮
+            tk.Button(button_frame, text="加载", width=10, command=on_ok).pack(side=tk.LEFT, padx=20)
+            tk.Button(button_frame, text="取消", width=10, command=on_cancel).pack(side=tk.RIGHT, padx=20)
+            
+            dialog.protocol("WM_DELETE_WINDOW", on_cancel)
+            self.root.wait_window(dialog)
+
+            if not selected_config:
+                return False
+
+            # 加载选定的配置文件
+            self.config_filename = os.path.join(working_dir, selected_config)
+            
             if not os.path.exists(self.config_filename):
                 raise FileNotFoundError(f"配置文件不存在: {self.config_filename}")
-   
+
             # 先读取配置文件
             with open(self.config_filename, 'r') as f:
                 config = json.load(f)
-               
+            
             # 在应用任何更改之前，先验证所有图像文件
             missing_images = []
             for img_data in config.get('image_list', []):
                 if not os.path.exists(img_data[0]):
                     missing_images.append(img_data[0])
-               
+            
             # 如果有任何图像文件不存在，直接返回，不做任何更改
             if missing_images:
                 error_message = f"配置文件中缺少以下图像文件: {', '.join(missing_images)}"
-                messagebox.showerror("错误", error_message)
+                messagebox.showerror("错误", error_message, parent=self.root)
                 logging.error(error_message)
                 return False
             
+            # 检查屏幕分辨率
             config_resolution = config.get('screen_resolution', None)
             current_resolution = (self.root.winfo_screenwidth(), self.root.winfo_screenheight())
-            print (current_resolution)
-            print (config_resolution)
+            print(current_resolution)
+            print(config_resolution)
             if (
                 config_resolution is None
                 or len(config_resolution) != 2
                 or config_resolution[0] != current_resolution[0]
                 or config_resolution[1] != current_resolution[1]
             ):
-                messagebox.showwarning("分辨率不匹配", "检测到屏幕分辨率与配置不一致，正在调整图片大小...")
+                messagebox.showwarning("分辨率不匹配", "检测到屏幕分辨率与配置不一致，正在调整图片大小...", parent=self.root)
                 self.convert_image_size(config_resolution, current_resolution)
-            with open(self.config_filename, 'r') as f:
-                config = json.load(f)                        
+                with open(self.config_filename, 'r') as f:
+                    config = json.load(f)                        
+            
             # 只有当所有图像文件都存在时，才应用配置
             self.image_list = config.get('image_list', [])
             self.hotkey = config.get('hotkey', '<F9>')
@@ -1541,22 +1877,22 @@ class ImageRecognitionApp:
             self.delay_time = config.get('delay_time', 0.1)
             self.loop_count = config.get('loop_count', 1)
             self.only_keyboard_var.set(config.get('only_keyboard', False))
- 
+
             # 清空并重新填充 Treeview
             for item in self.tree.get_children():
                 self.tree.delete(item)
-               
+            
             for img_data in self.image_list:
                 # 确保每个项目都有 11 个元素
                 while len(img_data) < 11:
                     img_data = img_data + ("",)
-                       
+                    
                 # 加载图像并创建缩略图
                 try:
                     image = Image.open(img_data[0])
                     image.thumbnail((50, 50))
                     photo = ImageTk.PhotoImage(image)
-                       
+                    
                     # 插入到 Treeview
                     tree_item = self.tree.insert("", tk.END, values=(
                         os.path.basename(img_data[0]),  # 图片名称
@@ -1572,35 +1908,276 @@ class ImageRecognitionApp:
                         img_data[10],   # 鼠标动作
                     ), image=photo)
                     self.tree.image_refs.append(photo)
-                    values = self.tree.item(tree_item, "values")
-                    if len(values) > 8 and values[8] == "禁用":
-                        self.tree.item(tree_item, tags=("disabled",))
                 except Exception as e:
                     print(f"处理图像时出错 {img_data[0]}: {e}")
                     logging.error(f"处理图像时出错 {img_data[0]}: {e}")
-               
+            
             # 更新循环次数输入框
             self.loop_count_entry.delete(0, tk.END)
             self.loop_count_entry.insert(0, str(self.loop_count))
-               
-             # 取消之前的全局热键， 注册新的全局热键
+            
+            # 取消之前的全局热键， 注册新的全局热键
             self.unregister_global_hotkey()
             self.register_global_hotkey()
             self.update_image_listbox()
-               
+            
             print(f"配置已从 {self.config_filename} 加载")
             logging.info(f"配置已从 {self.config_filename} 加载")
-               
+            
             # 显示成功消息
-            messagebox.showinfo("成功", f"配置已成功加载:\n{self.config_filename}")
+            messagebox.showinfo("成功", f"配置已成功加载:\n{self.config_filename}", parent=self.root)
             return True
-               
+            
         except Exception as e:
             error_message = f"加载配置时出错: {str(e)}"
             print(error_message)
             logging.error(error_message)
-            messagebox.showerror("错误", error_message)
+            messagebox.showerror("错误", error_message, parent=self.root)
             return False
+        
+    def export_config(self):
+        try:
+            # 获取程序工作目录
+            working_dir = os.getcwd()
+            
+            # 查找根目录下的所有 .json 配置文件
+            config_files = [f for f in os.listdir(working_dir) if f.endswith(".json")]
+            if not config_files:
+                messagebox.showinfo("提示", "没有找到任何配置文件", parent=self.root)
+                return
+
+            # 创建一个 Toplevel 窗口
+            export_window = tk.Toplevel(self.root)
+            export_window.title("选择导出的配置文件")
+            export_window.transient(self.root)
+            export_window.grab_set()
+
+            # 计算居中位置
+            main_window_x = self.root.winfo_x()
+            main_window_y = self.root.winfo_y()
+            main_window_width = self.root.winfo_width()
+            main_window_height = self.root.winfo_height()
+            
+            window_width = 400
+            window_height = 300
+            
+            x = main_window_x + (main_window_width - window_width) // 2
+            y = main_window_y + (main_window_height - window_height) // 2
+            
+            export_window.geometry(f"{window_width}x{window_height}+{x}+{y}")
+
+            # 主容器框架
+            main_frame = tk.Frame(export_window)
+            main_frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
+
+            # 列表框标题
+            tk.Label(main_frame, text="请选择要导出的配置文件:").pack(anchor=tk.W)
+
+            # 列表框容器
+            list_container = tk.Frame(main_frame)
+            list_container.pack(fill=tk.BOTH, expand=True)
+
+            # 列表框和滚动条
+            listbox = tk.Listbox(list_container, selectmode=tk.SINGLE)
+            scrollbar = tk.Scrollbar(list_container)
+
+            scrollbar.config(command=listbox.yview)
+            listbox.config(yscrollcommand=scrollbar.set)
+
+            for file in config_files:
+                listbox.insert(tk.END, file)
+
+            # 使用grid布局让列表框和滚动条并排
+            listbox.grid(row=0, column=0, sticky="nsew")
+            scrollbar.grid(row=0, column=1, sticky="ns")
+
+            # 配置grid权重
+            list_container.grid_rowconfigure(0, weight=1)
+            list_container.grid_columnconfigure(0, weight=1)
+
+            # 创建右键菜单
+            context_menu = tk.Menu(export_window, tearoff=0)
+            context_menu.add_command(label="删除配置", command=lambda: self.delete_config(export_window, listbox, working_dir))
+            
+            # 绑定右键事件
+            def show_context_menu(event):
+                if listbox.curselection():
+                    context_menu.post(event.x_root, event.y_root)
+                    
+            listbox.bind("<Button-3>", show_context_menu)
+
+            # 按钮框架 - 放在列表框下方
+            button_frame = tk.Frame(main_frame)
+            button_frame.pack(pady=(10, 0))
+
+            def confirm_export():
+                try:
+                    selection = listbox.curselection()
+                    if not selection:
+                        messagebox.showwarning("警告", "请先选择一个配置文件！", parent=export_window)
+                        return
+                    
+                    selected_file = config_files[selection[0]]
+                    config_basename = os.path.splitext(selected_file)[0]
+                    config_path = os.path.join(working_dir, selected_file)
+                    image_folder = os.path.join(working_dir, "screenshots", config_basename)
+
+                    # 让用户选择 ZIP 文件的保存位置
+                    export_zip_path = filedialog.asksaveasfilename(
+                        title="保存为 ZIP 文件",
+                        defaultextension=".zip",
+                        initialfile=config_basename,
+                        filetypes=[("ZIP 压缩文件", "*.zip")],
+                        parent=export_window
+                    )
+                    
+                    if not export_zip_path:
+                        return
+
+                    # 创建 ZIP 文件
+                    try:
+                        with zipfile.ZipFile(export_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                            zipf.write(config_path, os.path.basename(config_path))
+                            
+                            if os.path.exists(image_folder):
+                                for root, _, files in os.walk(image_folder):
+                                    for file in files:
+                                        file_path = os.path.join(root, file)
+                                        zip_path = os.path.join("screenshots", config_basename, os.path.relpath(file_path, image_folder))
+                                        zipf.write(file_path, zip_path)
+                        
+                        messagebox.showinfo(
+                            "导出成功",
+                            f"配置文件和图片已打包成 ZIP 文件：\n{export_zip_path}",
+                            parent=export_window
+                        )
+                        export_window.destroy()
+                    except Exception as e:
+                        messagebox.showerror("错误", f"ZIP 打包失败：{str(e)}", parent=export_window)
+                except Exception as e:
+                    logging.error(f"导出过程中出错: {str(e)}")
+                    messagebox.showerror("错误", f"导出过程中出错: {str(e)}", parent=export_window)
+
+            # 添加按钮
+            tk.Button(button_frame, text="导出", width=8, command=confirm_export).pack(side=tk.LEFT, padx=20)
+            tk.Button(button_frame, text="取消", width=8, command=export_window.destroy).pack(side=tk.RIGHT, padx=20)
+
+        except Exception as e:
+            logging.error(f"导出配置时出错: {str(e)}")
+            messagebox.showerror("导出失败", f"导出配置时出错: {str(e)}", parent=self.root)
+
+    def import_config(self):
+        try:
+            # 弹出文件选择对话框，支持选择.json或.zip文件
+            filename = filedialog.askopenfilename(
+                filetypes=[
+                    ("JSON/ZIP files", "*.json;*.zip"),
+                    ("JSON files", "*.json"),
+                    ("ZIP files", "*.zip")
+                ]
+            )
+            if not filename:
+                return
+            
+            screenshots_dir = self.screenshot_folder
+            if not os.path.exists(screenshots_dir):
+                os.makedirs(screenshots_dir)
+
+            # 处理ZIP文件导入
+            if filename.endswith('.zip'):
+                with zipfile.ZipFile(filename, 'r') as zip_ref:
+                    # 提取所有文件到临时目录
+                    temp_dir = tempfile.mkdtemp()
+                    zip_ref.extractall(temp_dir)
+                    
+                    # 查找解压后的.json配置文件
+                    json_files = [f for f in os.listdir(temp_dir) if f.endswith('.json')]
+                    if not json_files:
+                        messagebox.showerror("错误", "ZIP文件中未找到配置文件")
+                        shutil.rmtree(temp_dir)
+                        return
+                    
+                    # 只处理第一个找到的.json文件
+                    config_file = json_files[0]
+                    config_basename = os.path.splitext(config_file)[0]
+                    
+                    # 导入配置文件
+                    src_config = os.path.join(temp_dir, config_file)
+                    dst_config = os.path.join(config_file)
+                    shutil.copy2(src_config, dst_config)
+                    
+                    # 导入图片文件夹（如果存在）
+                    src_images = os.path.join(temp_dir, "screenshots", config_basename)
+                    if os.path.exists(src_images):
+                        dst_images = os.path.join(screenshots_dir, config_basename)
+                        if os.path.exists(dst_images):
+                            shutil.rmtree(dst_images)
+                        shutil.copytree(src_images, dst_images)
+                    
+                    shutil.rmtree(temp_dir)
+                    messagebox.showinfo("导入成功", f"已成功导入到: {screenshots_dir}")
+            
+            # 处理JSON文件导入
+            elif filename.endswith('.json'):
+                config_basename = os.path.splitext(os.path.basename(filename))[0]
+                
+                # 导入配置文件
+                new_config_path = os.path.join(screenshots_dir, os.path.basename(filename))
+                shutil.copy2(filename, new_config_path)
+                
+                # 尝试导入同级目录下的图片文件夹
+                image_folder = os.path.join(os.path.dirname(filename), config_basename)
+                if os.path.exists(image_folder):
+                    new_image_folder = os.path.join(screenshots_dir, config_basename)
+                    if os.path.exists(new_image_folder):
+                        shutil.rmtree(new_image_folder)
+                    shutil.copytree(image_folder, new_image_folder)
+                
+                messagebox.showinfo("导入成功", f"配置文件和图片已成功导入到: {screenshots_dir}")
+                
+        except Exception as e:
+            logging.error(f"导入配置时出错: {str(e)}")
+            messagebox.showerror("导入失败", f"导入配置时出错: {str(e)}")
+        self.import_config_success = True
+        self.load_config()
+
+    def delete_config(self, dialog, listbox, working_dir):
+        """删除选中的配置文件及其关联文件夹"""
+        selection = listbox.curselection()
+        if not selection:
+            messagebox.showwarning("警告", "请先选择一个配置文件", parent=dialog)
+            return
+        
+        config_file = listbox.get(selection[0])
+        config_path = os.path.join(working_dir, config_file)
+        
+        # 获取关联文件夹名称（假设与配置文件同名但无扩展名）
+        folder_name = os.path.splitext(config_file)[0]
+        folder_path = os.path.join(self.screenshot_folder, folder_name)
+        
+        # 确认删除
+        confirm = messagebox.askyesno("确认删除", 
+                                    f"确定要删除以下内容吗？\n配置文件: {config_file}\n关联文件夹: {folder_name}",
+                                    parent=dialog)
+        if not confirm:
+            return
+        
+        try:
+            # 删除配置文件
+            if os.path.exists(config_path):
+                os.remove(config_path)
+            
+            # 删除关联文件夹（如果存在）
+            if os.path.exists(folder_path) and os.path.isdir(folder_path):
+                shutil.rmtree(folder_path)
+                
+            # 从列表框中移除
+            listbox.delete(selection[0])
+            
+            messagebox.showinfo("成功", "配置及关联文件夹已成功删除", parent=dialog)
+        except Exception as e:
+            messagebox.showerror("错误", f"删除时出错: {str(e)}", parent=dialog)
+            logging.error(f"删除配置文件时出错: {str(e)}")
 
     def convert_image_size(self, config_resolution, current_resolution):
         # 打印输入参数
@@ -1735,19 +2312,6 @@ class ImageRecognitionApp:
             print(f"重置程序状态时出错: {e}")
             logging.error(f"重置程序状态时出错: {e}")
    
-    def load_config_manually(self):
-        """手动加载配置文件"""
-        file_path = filedialog.askopenfilename(filetypes=[("JSON files", "*.json")])
-        if file_path:
-            # 保存当前配置文件路径
-            old_config_filename = self.config_filename
-            self.config_filename = file_path
-               
-            # 尝试加载新配置
-            if not self.load_config():
-                # 如果加载失败，恢复原来的配置文件路径
-                self.config_filename = old_config_filename
-   
     def get_mouse_position(self, event=None):
         # 获取当前鼠标位置
         x, y = pyautogui.position()
@@ -1783,18 +2347,23 @@ class ImageRecognitionApp:
     def cleanup_on_exit(self):
         try:
             # 退出程序时删除未保存的图像
-            if not os.path.exists(self.config_filename):
-                for item in self.image_list:
-                    img_path = item[0]
-                    if os.path.exists(img_path):
-                        try:
-                            os.remove(img_path)
-                            print(f"图像文件已删除: {img_path}")
-                            logging.info(f"图像文件已删除: {img_path}")
-                        except Exception as e:
-                            print(f"删除图像文件时出错: {e}")
-                            logging.error(f"删除图像文件时出错: {e}")
-            #  取消全局热键
+            screenshots_dir = self.screenshot_folder
+            if os.path.exists(screenshots_dir):
+                # 获取screenshots文件夹中所有文件（不包括子目录）
+                files_to_delete = [f for f in os.listdir(screenshots_dir) 
+                                if os.path.isfile(os.path.join(screenshots_dir, f))]
+                
+                for filename in files_to_delete:
+                    img_path = os.path.join(screenshots_dir, filename)
+                    try:
+                        os.remove(img_path)
+                        print(f"图像文件已删除: {img_path}")
+                        logging.info(f"图像文件已删除: {img_path}")
+                    except Exception as e:
+                        print(f"删除图像文件时出错: {e}")
+                        logging.error(f"删除图像文件时出错: {e}")
+            
+            # 取消全局热键
             self.unregister_global_hotkey()
         except Exception as e:
             print(f"清理时出错: {e}")
@@ -1848,15 +2417,16 @@ class ImageRecognitionApp:
 
         self.context_menu.add_command(label="复制", command=self.copy_item)
         self.context_menu.add_command(label="粘贴", command=self.paste_item)
+        self.context_menu.add_separator()
         self.context_menu.add_command(label="删除", command=self.delete_selected_image)
-        self.context_menu.add_command(label="禁用", command=self.toggle_disable_status)  # 注意保持为“禁用”，索引7
+        self.context_menu.add_command(label="禁用", command=self.toggle_disable_status)  # 注意保持为“禁用”，索引8
         self.context_menu.add_separator()
 
         self.context_menu.add_command(label="步骤名称", command=self.edit_image_name)
+        self.context_menu.add_command(label="延时ms", command=self.edit_wait_time)
         self.context_menu.add_command(label="相似度", command=self.edit_similarity_threshold)
         self.context_menu.add_command(label="键盘动作", command=self.edit_keyboard_input)
         self.context_menu.add_command(label="鼠标动作", command=self.edit_mouse_action)
-        self.context_menu.add_command(label="延时ms", command=self.edit_wait_time)
         self.context_menu.add_separator()
 
         self.context_menu.add_command(label="从此步骤运行", command=self.start_from_step)
@@ -1880,7 +2450,7 @@ class ImageRecognitionApp:
             # 更新禁用/启用菜单项（基于“状态”列）
             disabled = self.item_is_disabled(selected_item)
             new_disable_label = "启用" if disabled else "禁用"
-            self.context_menu.entryconfig(7, label=new_disable_label, command=self.toggle_disable_status)
+            self.context_menu.entryconfig(8, label=new_disable_label, command=self.toggle_disable_status)
             self.update_label() # 更新详细信息
 
     def toggle_disable_status(self):
@@ -2408,7 +2978,7 @@ class ImageRecognitionApp:
 
             # 动态设置预览尺寸
             if screen_width >= 2560 and screen_height >= 1440:
-                max_size = (247, 217)
+                max_size = (279, 217)
             else:
                 max_size = (290, 220)
             
