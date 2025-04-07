@@ -1529,8 +1529,7 @@ class ImageRecognitionApp:
                 
             # 再处理键盘动作
             if keyboard_input:
-                try:
-                    time.sleep(0.5)  # 等待界面响应           
+                try:      
                     print(f"[DEBUG] 解析输入: {keyboard_input}")
                     commands = self.parse_keyboard_input(keyboard_input)
 
