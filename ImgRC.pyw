@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+from pathlib import Path
 import tempfile
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox
@@ -82,7 +84,7 @@ class ImageRecognitionApp:
         self.screenshot_folder = 'screenshots'  # 截图保存文件夹
         self.paused = False  # 控制脚本是否暂停
         self.copied_item = None
-        self.config_filename = 'config.json'  # 默认配置文件名
+        self.config_filename = None  # 默认配置文件名
         self.start_step_index = 0  # 初始化
         self.default_photo = None  # 初始化
         self.from_step = False
@@ -501,9 +503,17 @@ class ImageRecognitionApp:
         if self.follow_current_step.get():
             self.allow_minimize_var.set(False)
  
-    def init_logging(self): # 初始化日志
-        handler = RotatingFileHandler('app.log', maxBytes=10*1024*1024, backupCount=5)  # 创建日志文件处理器
-        logging.basicConfig(handlers=[handler], level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s') # 配置日志格式
+    def init_logging(self):  # 初始化日志
+        handler = RotatingFileHandler(
+            'app.log', 
+            maxBytes=5*1024*1024,  # 最大5MB
+            backupCount=1          # 只保留 1 个备份
+        )
+        logging.basicConfig(
+            handlers=[handler],
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s'
+        )
 
     def on_treeview_drag_start(self, event):
         """开始拖动时记录选中的行"""
@@ -697,7 +707,7 @@ class ImageRecognitionApp:
         self.canvas.bind("<ButtonPress-1>", self.on_button_press)
         self.canvas.bind("<B1-Motion>", self.on_mouse_drag)
         self.canvas.bind("<ButtonRelease-1>", self.on_button_release)
-        
+                
     def exit_screenshot_mode(self, event=None):
         """退出截图模式，关闭透明窗口，恢复主窗口"""
         if hasattr(self, 'top') and self.top:  # 确保 self.top 存在
@@ -806,9 +816,29 @@ class ImageRecognitionApp:
                 old_image_path = selected_image[0]  # 原图片路径
                 try:
                     if os.path.exists(old_image_path):
-                        os.remove(old_image_path)  # 删除旧图片
+                        # 获取原图片所在目录
+                        old_dir = os.path.dirname(old_image_path)                 
+                        # 获取截图文件名
+                        screenshot_filename = os.path.basename(screenshot_path)                   
+                        # 构造新路径（移动到原图片所在目录）
+                        new_screenshot_path = os.path.join(old_dir, screenshot_filename)
+                        
+                        # 只有当新旧路径不同时才执行移动操作
+                        if new_screenshot_path != screenshot_path:             
+                            # 移动文件
+                            if os.path.exists(screenshot_path):
+                                # 如果目标位置已有文件，先删除
+                                if os.path.exists(new_screenshot_path):
+                                    os.remove(new_screenshot_path)
+                                os.rename(screenshot_path, new_screenshot_path)                      
+                            # 更新 screenshot_path 为新路径
+                            screenshot_path = new_screenshot_path
+                        
+                        # 删除旧图片
+                        os.remove(old_image_path)
+                        
                 except Exception as e:
-                    print(f"删除旧图片失败: {e}")
+                    print(f"操作失败: {e}")
                 
                 # 2. 处理鼠标动作数据
                 if selected_image[4] and ":" in selected_image[4]:  # 如果有现有的鼠标动作数据
@@ -838,12 +868,48 @@ class ImageRecognitionApp:
                     selected_image[9],      # 9: 【需禁用】目标
                     selected_image[10]      # 10: 鼠标动作
                 )
-                
+
                 # 4. 更新数据源
                 self.image_list[selected_index] = updated_image
                 self.need_retake_screenshot = False  
-
+                
         else:
+            if self.config_filename and os.path.exists(self.config_filename):
+                old_image_path = screenshot_path  # 原图片路径
+                config_basename = Path(self.config_filename).stem  # 获取不带扩展名的配置文件名
+                config_folder_dir = Path(self.screenshot_folder) / config_basename  # 构造目标目录
+
+                try:
+                    # 确保目标目录存在（使用相对路径）
+                    config_folder_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    # 将路径转换为Path对象便于处理
+                    old_path = Path(old_image_path)
+                    new_path = config_folder_dir / old_path.name
+                    
+                    if old_path.exists():
+                        # 只有当新旧路径不同时才执行移动操作
+                        if str(new_path) != str(old_path):
+                            # 如果目标位置已有文件，先删除
+                            if new_path.exists():
+                                new_path.unlink()
+                            
+                            # 移动文件（使用rename保持相对路径）
+                            old_path.rename(new_path)
+                            
+                            # 更新screenshot_path为新路径（保持相对路径）
+                            screenshot_path = str(new_path)
+                        else:
+                            print("源路径和目标路径相同，跳过移动操作")
+                    else:
+                        print(f"原图片不存在: {old_image_path}")
+
+                except Exception as e:
+                    print(f"操作失败: {e}")
+                    print(f"原路径: {old_path}")
+                    print(f"新路径: {new_path}")
+                    print(f"当前工作目录: {os.getcwd()}")
+                    
             selected_item = self.tree.selection()  # 获取当前选中的项
             step_name = f"步骤{self._next_step_num}"  # 生成递增的步骤名称
             if selected_item:   
@@ -852,6 +918,7 @@ class ImageRecognitionApp:
                 self.image_list.insert(insert_index, (screenshot_path, step_name, 0.8, "", mouse_click_coordinates, 100, "", "", "启用", "", "左键单击 1次"))
             else:
                 self.image_list.append((screenshot_path, step_name, 0.8, "", mouse_click_coordinates, 100, "", "", "启用", "", "左键单击 1次"))
+
         self.update_image_listbox()  # 更新详细信息
 
         # 关闭全屏透明窗口
@@ -874,6 +941,36 @@ class ImageRecognitionApp:
         else:
             print("没有可用的项目")
         self.update_label() # 更新详细信息
+        
+        if self.thread is not None:
+            # 设置停止标志（如果线程支持）
+            self.running = False
+            
+            # 尝试正常停止
+            self.thread.join(timeout=1)  # 等待1秒
+            
+            if self.thread.is_alive():
+                print("警告：脚本线程未能在1秒内停止，尝试强制终止")
+                logging.warning("脚本线程未能在1秒内停止，尝试强制终止")
+                
+                # 强制终止线程（不推荐，但可用）
+                try:
+                    import ctypes
+                    thread_id = self.thread.ident
+                    res = ctypes.pythonapi.PyThreadState_SetAsyncExc(thread_id, ctypes.py_object(SystemExit))
+                    if res == 0:
+                        raise ValueError("无效的线程ID")
+                    elif res != 1:
+                        ctypes.pythonapi.PyThreadState_SetAsyncExc(thread_id, 0)
+                        raise SystemError("PyThreadState_SetAsyncExc失败")
+                except Exception as e:
+                    print(f"强制终止线程失败: {e}")
+                    logging.error(f"强制终止线程失败: {e}")
+        
+                self.thread = None
+                print("脚本已停止")
+                logging.info("脚本已停止")
+                self.root.after(0, self.update_ui_after_stop)
 
     def retake_screenshot(self):
         self.need_retake_screenshot = True     
@@ -985,6 +1082,24 @@ class ImageRecognitionApp:
         if not self.tree.selection():
             self.load_default_image()
 
+        # 只有在配置文件名非空且文件存在时才执行更新
+        if self.config_filename and os.path.exists(self.config_filename):
+            # 更新配置文件
+            config = {
+                'hotkey': self.hotkey,
+                'similarity_threshold': self.similarity_threshold,
+                'delay_time': self.delay_time,
+                'loop_count': self.loop_count,
+                'image_list': [img for img in self.image_list if os.path.exists(img[0])],
+                'only_keyboard': self.only_keyboard_var.get(),
+            }
+
+            # 保存到配置文件
+            with open(self.config_filename, 'w', encoding='utf-8') as f:
+                json.dump(config, f, ensure_ascii=False, indent=4)
+            print("已更新配置文件:", self.config_filename)
+            logging.info("已更新配置文件: %s", self.config_filename)
+
     def delete_selected_image(self):
         try:
             selected_item = self.tree.selection()
@@ -1017,15 +1132,14 @@ class ImageRecognitionApp:
                     if result:  # 用户点击是，更新配置文件并删除图片
                         try:
                             # 读取现有配置
-                            with open(self.config_filename, 'r') as f:
-                                config = json.load(f)
-                               
+                            with open(self.config_filename, 'r', encoding='utf-8') as f:
+                                config = json.load(f)                          
                             # 更新配置中的图像列表
                             config['image_list'] = self.image_list
                                
                             # 保存更新后的配置
-                            with open(self.config_filename, 'w') as f:
-                                json.dump(config, f)
+                            with open(self.config_filename, 'w', encoding='utf-8') as f:
+                                json.dump(config, f, ensure_ascii=False, indent=4)
                                    
                             # 检查是否有其他项目引用相同的图像文件
                             is_referenced = any(item[0] == img_path for item in self.image_list)
@@ -1294,7 +1408,6 @@ class ImageRecognitionApp:
         self.thread = None
         print("脚本已停止")
         logging.info("脚本已停止")
-        self.root.attributes('-topmost', False)  # 取消最上层设置
         self.root.after(0, self.update_ui_after_stop)
    
     def update_ui_after_stop(self):
@@ -1328,9 +1441,10 @@ class ImageRecognitionApp:
                 self.tree.focus(item_id)
    
     def match_and_click(self, template_path, similarity_threshold): 
-        #图像识别匹配
+        # 图像识别匹配
         # 获取当前步骤的完整信息
         selected_index = next((i for i, item in enumerate(self.image_list) if item[0] == template_path), None)
+        print(template_path)
         if selected_index is not None:
             current_step = self.image_list[selected_index]
             mouse_coordinates = current_step[4]  # 获取鼠标坐标
@@ -1338,18 +1452,26 @@ class ImageRecognitionApp:
         else:
             mouse_coordinates = ""
             keyboard_input = ""
- 
+    
         # 获取屏幕截图
         screenshot = pyautogui.screenshot()
         screenshot = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
- 
-        # 读取模板图像
-        template = cv2.imread(template_path)
- 
+    
+        # 检查模板图像是否存在
+        if not os.path.exists(template_path):
+            raise FileNotFoundError(f"找不到模板图像：{template_path}")
+    
+        # 读取模板图像（使用 cv2.imdecode 方式解决中文路径问题）
+        with open(template_path, 'rb') as f:
+            file_bytes = np.asarray(bytearray(f.read()), dtype=np.uint8)
+        template = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+        if template is None:
+            raise ValueError(f"无法加载模板图像：{template_path}")
+    
         # 执行模板匹配
         result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
         min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
- 
+    
         # 如果相似度超过阈值
         if max_val >= similarity_threshold:
             # 先处理鼠标点击、滚轮操作等
@@ -1615,7 +1737,6 @@ class ImageRecognitionApp:
             'loop_count': self.loop_count,
             'image_list': [img for img in self.image_list if os.path.exists(img[0])],
             'only_keyboard': self.only_keyboard_var.get(),
-            'screen_resolution': (self.root.winfo_screenwidth(), self.root.winfo_screenheight())
         }
         # 检查图片列表是否为空
         if not config['image_list']:
@@ -1689,9 +1810,7 @@ class ImageRecognitionApp:
             # 获取程序工作目录
             working_dir = os.getcwd()
             config_path = os.path.join(working_dir, filename)          
-            # 创建 screenshots 文件夹
             screenshots_dir = self.screenshot_folder
-            os.makedirs(screenshots_dir, exist_ok=True)
 
             # 创建与配置同名的子文件夹
             config_basename = os.path.splitext(os.path.basename(filename))[0]
@@ -1716,10 +1835,10 @@ class ImageRecognitionApp:
             config['image_list'] = updated_image_list
             
             # 保存配置文件
-            with open(config_path, 'w') as f:
-                json.dump(config, f, indent=4)
+            with open(config_path, 'w', encoding='utf-8') as f:
+                json.dump(config, f, ensure_ascii=False, indent=4)       
             self.config_filename = config_path
-            
+    
             # 简化保存成功提示
             messagebox.showinfo("保存成功", "配置保存成功！", parent=self.root)
             
@@ -1836,38 +1955,22 @@ class ImageRecognitionApp:
                 raise FileNotFoundError(f"配置文件不存在: {self.config_filename}")
 
             # 先读取配置文件
-            with open(self.config_filename, 'r') as f:
-                config = json.load(f)
-            
+            with open(self.config_filename, 'r', encoding='utf-8') as f:
+                config = json.load(f)           
+
             # 在应用任何更改之前，先验证所有图像文件
             missing_images = []
             for img_data in config.get('image_list', []):
                 if not os.path.exists(img_data[0]):
                     missing_images.append(img_data[0])
-            
+
             # 如果有任何图像文件不存在，直接返回，不做任何更改
             if missing_images:
                 error_message = f"配置文件中缺少以下图像文件: {', '.join(missing_images)}"
                 messagebox.showerror("错误", error_message, parent=self.root)
                 logging.error(error_message)
-                return False
-            
-            # 检查屏幕分辨率
-            config_resolution = config.get('screen_resolution', None)
-            current_resolution = (self.root.winfo_screenwidth(), self.root.winfo_screenheight())
-            print(current_resolution)
-            print(config_resolution)
-            if (
-                config_resolution is None
-                or len(config_resolution) != 2
-                or config_resolution[0] != current_resolution[0]
-                or config_resolution[1] != current_resolution[1]
-            ):
-                messagebox.showwarning("分辨率不匹配", "检测到屏幕分辨率与配置不一致，正在调整图片大小...", parent=self.root)
-                self.convert_image_size(config_resolution, current_resolution)
-                with open(self.config_filename, 'r') as f:
-                    config = json.load(f)                        
-            
+                return False                  
+
             # 只有当所有图像文件都存在时，才应用配置
             self.image_list = config.get('image_list', [])
             self.hotkey = config.get('hotkey', '<F9>')
@@ -1879,12 +1982,12 @@ class ImageRecognitionApp:
             # 清空并重新填充 Treeview
             for item in self.tree.get_children():
                 self.tree.delete(item)
-            
+
             for img_data in self.image_list:
                 # 确保每个项目都有 11 个元素
                 while len(img_data) < 11:
-                    img_data = img_data + ("",)
-                    
+                    img_data = img_data + [""]
+
                 # 加载图像并创建缩略图
                 try:
                     image = Image.open(img_data[0])
@@ -1900,10 +2003,10 @@ class ImageRecognitionApp:
                         img_data[4],  # 坐标(F2)
                         img_data[5],  # 延时ms
                         img_data[6],  # 条件
-                        img_data[7],   # 需跳转
+                        img_data[7],  # 需跳转
                         img_data[8],  # 状态
-                        img_data[9],   # 需禁用
-                        img_data[10],   # 鼠标动作
+                        img_data[9],  # 需禁用
+                        img_data[10], # 鼠标动作
                     ), image=photo)
                     self.tree.image_refs.append(photo)
                 except Exception as e:
@@ -2172,106 +2275,6 @@ class ImageRecognitionApp:
             messagebox.showerror("错误", f"删除时出错: {str(e)}", parent=dialog)
             logging.error(f"删除配置文件时出错: {str(e)}")
 
-    def convert_image_size(self, config_resolution, current_resolution):
-        # 打印输入参数
-        print(f"[DEBUG] 输入参数 - config_resolution: {config_resolution}, current_resolution: {current_resolution}")
-        with open(self.config_filename, 'r') as f:
-            config = json.load(f)        
-        # 根据当前分辨率确定缩放因子
-        if current_resolution == (2560, 1440):
-            scale_factor = 1.25
-            coord_x_scale_factor = 1.25
-            coord_y_scale_factor = 1.16
-        elif current_resolution == (1920, 1080):
-            scale_factor = 1 / 1.25
-            coord_x_scale_factor = 1 / 1.25
-            coord_y_scale_factor = 1 / 1.16
-        else:
-            scale_factor = 1  # 对于其他分辨率，不做尺寸调整
-            coord_x_scale_factor = 1
-            coord_y_scale_factor = 1
-        print(f"[DEBUG] 计算得到的缩放因子: {scale_factor}")
-        self.image_list = config.get('image_list', [])
-        print (self.image_list)
-        print(f"[DEBUG] 将要处理的图像数量: {len(self.image_list)}")
-        
-        for idx, img_data in enumerate(self.image_list):
-            image_path = img_data[0]
-            print(f"[DEBUG] 正在处理第 {idx + 1} 张图像: {image_path}")
-            
-            try:
-                # 打开原始图片
-                image = Image.open(image_path)
-                print(f"[DEBUG] 原始图像尺寸: {image.width}x{image.height}")
-                
-                # 计算新尺寸
-                new_width = int(image.width * scale_factor)
-                new_height = int(image.height * scale_factor)
-                print(f"[DEBUG] 计算后的新尺寸: {new_width}x{new_height}")
-                
-                # 调整图片大小
-                resized_image = image.resize((new_width, new_height), Image.LANCZOS)
-                
-                # 保存调整后的图片，覆盖原文件
-                resized_image.save(image_path)
-                print(f"[DEBUG] 成功调整并保存图像: {image_path}")
-                
-                # 缩放坐标数据（处理字符串格式的坐标 "x,y"）
-                if len(img_data) > 4 and img_data[4]:
-                    mouse_click_coordinates = img_data[4]
-                    original_coords = mouse_click_coordinates.split(":")[1] if mouse_click_coordinates and ":" in mouse_click_coordinates else mouse_click_coordinates
-                    try:
-                        # 分割坐标字符串
-                        x, y = original_coords.split(',')
-                        # 转换为整数并缩放
-                        scaled_x = int(int(x) * coord_x_scale_factor)
-                        scaled_y = int(int(y) * coord_y_scale_factor)
-                        # 重新组合为字符串
-                        scaled_coords = f"{scaled_x},{scaled_y}"
-                        img_data[4] = scaled_coords
-                        print(f"[DEBUG] 坐标已从 {original_coords} 缩放为 {scaled_coords}")
-                        print (img_data)
-                    except Exception as coord_e:
-                        error_msg = f"处理坐标 {original_coords} 时出错: {coord_e}"
-                        print(f"[ERROR] {error_msg}")
-                        logging.error(error_msg)
-                
-                logging.info(f"调整图片 {image_path} 尺寸到 {new_width}x{new_height}，并缩放坐标数据")
-            except Exception as e:
-                error_msg = f"处理图像 {image_path} 时出错: {e}"
-                print(f"[ERROR] {error_msg}")
-                logging.error(error_msg)
-        
-        # 保存修改后的配置（包括缩放后的坐标）
-        with open(self.config_filename, 'w') as f:
-            json.dump(config, f, indent=4)
-        print("[DEBUG] 所有图像处理和坐标缩放完成，配置已更新")
-
-        try:
-            # 1. 读取现有配置文件
-            with open(self.config_filename, 'r') as f:
-                config = json.load(f)
-            
-            # 2. 更新分辨率设置
-            config['screen_resolution'] = current_resolution
-            
-            # 3. 写回配置文件
-            with open(self.config_filename, 'w') as f:
-                json.dump(config, f, indent=4)  # indent 参数使输出格式化更美观
-            
-            print(f"[SUCCESS] 已更新屏幕分辨率为: {current_resolution}")
-            return True
-            
-        except FileNotFoundError:
-            print(f"[ERROR] 配置文件 {self.config_filename} 不存在")
-            return False
-        except json.JSONDecodeError:
-            print(f"[ERROR] 配置文件 {self.config_filename} 格式错误")
-            return False
-        except Exception as e:
-            print(f"[ERROR] 更新分辨率时出错: {str(e)}")
-            return False
-
     def reset_to_initial_state(self):
         """重置程序到初始状态"""
         try:
@@ -2285,6 +2288,7 @@ class ImageRecognitionApp:
             self.paused = False
             self.start_step_index = 0
             self.only_keyboard_var.set(False)
+            self.config_filename = None  
                
             # 重置界面元素
             self.update_image_listbox()
@@ -2515,6 +2519,7 @@ class ImageRecognitionApp:
                 updated_image[10],
             ))
             self.update_context_menu()
+            self.update_image_listbox()
 
     def item_is_disabled(self, item):
         values = self.tree.item(item, "values")
@@ -2528,6 +2533,7 @@ class ImageRecognitionApp:
     
     def toggle_click_label(self):
         self.update_context_menu()  # 右键菜单更新
+        self.update_image_listbox()
 
     def start_from_step(self):
         selected_items = self.tree.selection()
@@ -2568,11 +2574,12 @@ class ImageRecognitionApp:
             self.copied_item = (new_image_path,) + tuple(original_item[1:])
    
     def create_image_copy(self, original_path):
-        # 创建图像文件的副本
+        # 创建图像文件的副本（与原文件同目录）
+        dirname = os.path.dirname(original_path)
         base_name = os.path.basename(original_path)
         name, ext = os.path.splitext(base_name)
         new_name = f"{name}_copy{ext}"
-        new_path = os.path.join(self.screenshot_folder, new_name)
+        new_path = os.path.join(dirname, new_name)
         shutil.copy2(original_path, new_path)
         return new_path
        
