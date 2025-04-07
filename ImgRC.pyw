@@ -531,42 +531,37 @@ class ImageRecognitionApp:
             self.tree.selection_set(target_item)  # 选中目标行
 
     def on_treeview_drag_release(self, event):
-        """释放鼠标时交换行数据和图片，并自动更新预览"""
+        """释放鼠标时将拖动项插入到目标项位置，并更新图片和预览"""
         if not hasattr(self, "dragged_item"):
             return
 
         target_item = self.tree.identify_row(event.y)
         if target_item and target_item != self.dragged_item:
-            # 获取行索引
             dragged_index = self.tree.index(self.dragged_item)
             target_index = self.tree.index(target_item)
 
-            # 交换文本数据
+            # 获取拖动项的值
             dragged_values = self.tree.item(self.dragged_item, "values")
-            target_values = self.tree.item(target_item, "values")
-            self.tree.item(self.dragged_item, values=target_values)
-            self.tree.item(target_item, values=dragged_values)
+            dragged_image = self.image_list[dragged_index] if dragged_index < len(self.image_list) else None
+            dragged_image_data = self.image_dict.get(self.dragged_item)
 
-            # 交换图片
-            if dragged_index < len(self.image_list) and target_index < len(self.image_list):
-                self.image_list[dragged_index], self.image_list[target_index] = (
-                    self.image_list[target_index],
-                    self.image_list[dragged_index],
-                )
+            # 删除原项
+            self.tree.delete(self.dragged_item)
+            del self.image_list[dragged_index]
+            if self.dragged_item in self.image_dict:
+                del self.image_dict[self.dragged_item]
 
-            # 交换 image_dict 的引用
-            if self.dragged_item in self.image_dict and target_item in self.image_dict:
-                self.image_dict[self.dragged_item], self.image_dict[target_item] = (
-                    self.image_dict[target_item],
-                    self.image_dict[self.dragged_item],
-                )
+            # 插入新项
+            new_item = self.tree.insert("", target_index, values=dragged_values)
+            self.image_list.insert(target_index, dragged_image)
+            if dragged_image_data:
+                self.image_dict[new_item] = dragged_image_data
 
-            # **主动更新预览**
-            self.tree.selection_set(target_item)  # 选中拖动目标
-            self.on_treeview_select(None)  # 调用预览方法
+            # 选中新项并更新预览
+            self.tree.selection_set(new_item)
+            self.dragged_item = new_item  # 更新拖动项引用以便预览函数识别
+            self.on_treeview_select(None)
             self.update_image_listbox()
-
-        # 清除拖动状态
         self.dragged_item = None
 
     def update_label(self, event=None):
@@ -1084,7 +1079,8 @@ class ImageRecognitionApp:
 
         # 只有在配置文件名非空且文件存在时才执行更新
         if self.config_filename and os.path.exists(self.config_filename):
-            # 更新配置文件
+            with open(self.config_filename, 'r', encoding='utf-8') as f:
+                config = json.load(f)    
             config = {
                 'hotkey': self.hotkey,
                 'similarity_threshold': self.similarity_threshold,
@@ -1841,6 +1837,7 @@ class ImageRecognitionApp:
     
             # 简化保存成功提示
             messagebox.showinfo("保存成功", "配置保存成功！", parent=self.root)
+            self.image_list = updated_image_list
             
         except Exception as e:
             error_msg = f"保存配置时出错: {str(e)}"
@@ -1960,9 +1957,25 @@ class ImageRecognitionApp:
 
             # 在应用任何更改之前，先验证所有图像文件
             missing_images = []
+            existing_image_paths = set()
+
+            config_basename = Path(self.config_filename).stem  # 不带扩展名
+            config_folder_dir = Path(self.screenshot_folder) / config_basename
+
+            # 收集存在的图片路径
             for img_data in config.get('image_list', []):
-                if not os.path.exists(img_data[0]):
-                    missing_images.append(img_data[0])
+                image_path = Path(img_data[0])
+                if image_path.exists():
+                    existing_image_paths.add(image_path.resolve())  # 保存绝对路径
+                else:
+                    missing_images.append(str(image_path))
+
+            # 删除 config_folder_dir 中未在 image_list 中的文件
+            for file in config_folder_dir.iterdir():
+                if file.is_file() and file.resolve() not in existing_image_paths:
+                    file.unlink()
+                    print (f"已删除配置中不存在的图片: {file}")
+                    logging.info (f"已删除配置中不存在的图片: {file}")
 
             # 如果有任何图像文件不存在，直接返回，不做任何更改
             if missing_images:
