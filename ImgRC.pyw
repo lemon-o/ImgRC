@@ -1155,7 +1155,6 @@ class ImageRecognitionApp:
                 self.root.iconify()  # 最小化主窗口
             else:
                 self.root.lift()  # 确保主窗口在最上层
-                self.root.attributes('-topmost', True)  # 设置为最上层窗口
             self.start_script_thread()
 
     def start_script_thread(self):
