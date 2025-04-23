@@ -246,15 +246,16 @@ class ImageRecognitionApp:
         )
         self.allow_minimize_checkbox.pack(side=tk.LEFT, pady=5)
 
-        # 跟随步骤勾选框
+        # 窗口置顶
         self.follow_step_checkbox = tb.Checkbutton(
             self.region_m, 
-            text="跟随步骤", 
+            text="窗口置顶", 
             variable=self.follow_current_step, 
             bootstyle="toolbutton",
-            command=self.toggle_follow_step
+            command=self.toggle_topmost
         )
         self.follow_step_checkbox.pack(side=tk.LEFT, pady=5)
+
 
         # 仅键盘操作勾选框
         self.only_keyboard_checkbox = tb.Checkbutton(self.region_m, text="仅键盘操作", variable=self.only_keyboard_var, bootstyle=TOOLBUTTON)
@@ -499,12 +500,23 @@ class ImageRecognitionApp:
 
     def toggle_allow_minimize(self):
         if self.allow_minimize_var.get():
+            # 如果勾选“运行时隐藏”，取消勾选“窗口置顶”
             self.follow_current_step.set(False)
+            self.root.attributes('-topmost', False)  # 取消窗口置顶
+        else:
+            # 如果“运行时隐藏”未勾选，检查“窗口置顶”的状态
+            if not self.follow_current_step.get():
+                self.root.attributes('-topmost', False)
 
-    def toggle_follow_step(self):
+    def toggle_topmost(self):
         if self.follow_current_step.get():
+            # 如果勾选“窗口置顶”，取消勾选“运行时隐藏”
             self.allow_minimize_var.set(False)
- 
+            self.root.attributes('-topmost', True)  # 设置窗口置顶
+        else:
+            # 如果“窗口置顶”未勾选，取消窗口置顶状态
+            self.root.attributes('-topmost', False)
+
     def init_logging(self):  # 初始化日志
         handler = RotatingFileHandler(
             'app.log', 
@@ -1083,6 +1095,7 @@ class ImageRecognitionApp:
         if self.config_filename and os.path.exists(self.config_filename):
             with open(self.config_filename, 'r', encoding='utf-8') as f:
                 config = json.load(f)    
+            self.loop_count = int(self.loop_count_entry.get())
             config = {
                 'hotkey': self.hotkey,
                 'similarity_threshold': self.similarity_threshold,
@@ -1213,8 +1226,7 @@ class ImageRecognitionApp:
                     index += 1
                     continue
 
-                if self.follow_current_step.get():
-                    self.root.after(0, lambda idx=index: self.focus_on_step(idx))
+                self.root.after(0, lambda idx=index: self.focus_on_step(idx))
 
                 current_step = self.image_list[index]
                 img_path = current_step[0]
@@ -1297,6 +1309,7 @@ class ImageRecognitionApp:
         self.root.after(0, self.update_ui_after_stop)
         self.loop_count_entry.delete(0, "end")  # 清空当前内容
         self.loop_count_entry.insert(0, "1")    # 强制插入 1
+        self.loop_count = int(self.loop_count_entry.get())
         print(f"所有步骤已执行完毕，已循环{self.current_loop}次")
         logging.info(f"所有步骤已执行完毕，已循环{self.current_loop}次") 
         print(f"-------------------------------------------------------------------------------------")
@@ -1365,9 +1378,10 @@ class ImageRecognitionApp:
         self.root.after(0, self.update_ui_after_stop)
 
         result = self.loop_count - self.current_loop  # 计算结果
-        display_value = max(0, result)  # 如果结果为负数，则设为 0
+        display_value = max(1, result)  # 如果结果为负数，则设为 1
         self.loop_count_entry.delete(0, "end")  # 清空当前内容
         self.loop_count_entry.insert(0, str(display_value))  # 插入新值（确保非负）
+        self.loop_count = int(self.loop_count_entry.get())
         
         print(f"脚本已停止在第{self.current_loop}次循环的【{self.current_step_name}】")
         logging.info(f"脚本已停止在第{self.current_loop}次循环的【{self.current_step_name}】")
@@ -1986,6 +2000,7 @@ class ImageRecognitionApp:
 
     def save_config(self):
         # 构造配置字典，过滤掉不存在的图片
+        self.loop_count = int(self.loop_count_entry.get())
         config = {
             'hotkey': self.hotkey,
             'similarity_threshold': self.similarity_threshold,
@@ -2656,8 +2671,6 @@ class ImageRecognitionApp:
             self.loop_count_entry.delete(0, tk.END)
             self.loop_count_entry.insert(0, str(self.loop_count))
             self.toggle_run_button.config(text="开始运行(F9)")
-            self.follow_current_step.set(False)
-            self.allow_minimize_var.set(True)
                
             print("程序已重置为初始状态")
             logging.info("程序已重置为初始状态")      
@@ -2768,19 +2781,11 @@ class ImageRecognitionApp:
         self.empty_space_menu = tk.Menu(self.root, tearoff=0)
         self.empty_space_menu.add_command(label="清空列表", command=self.clear_list)
         self.empty_space_menu.add_separator()
-
-        # 添加置顶/取消置顶菜单项（记住它的位置）
-        self.topmost_var = tk.BooleanVar(value=False)
-        self.topmost_menu_index = 2  # 这是"置顶窗口"菜单项的位置索引（从0开始计数）
-        self.empty_space_menu.add_command(
-            label="窗口置顶", 
-            command=self.toggle_topmost
-        )
-        self.empty_space_menu.add_separator()
         self.empty_space_menu.add_command(label="保存配置", command=self.save_config)
         self.empty_space_menu.add_command(label="加载配置", command=self.load_config)
         self.empty_space_menu.add_separator()
         self.empty_space_menu.add_command(label="查看日志", command=self.show_logs)
+
         # 选中项的菜单
         self.context_menu = tk.Menu(self.root, tearoff=0, postcommand=self.update_context_menu)   
         self.context_menu.add_command(label="条件跳转", command=self.set_condition_jump) #索引0
@@ -2801,19 +2806,11 @@ class ImageRecognitionApp:
         self.context_menu.add_command(label="键盘动作", command=self.edit_keyboard_input)
         self.context_menu.add_command(label="鼠标动作", command=self.edit_mouse_action)
         self.context_menu.add_separator()
-
         self.context_menu.add_command(label="从此步骤运行", command=self.start_from_step)
-
-    def toggle_topmost(self):
-        """切换窗口置顶状态"""
-        self.topmost_var.set(not self.topmost_var.get())
-        self.root.attributes('-topmost', self.topmost_var.get())
-        
-        # 更新菜单项文字（使用之前存储的索引位置）
-        if self.topmost_var.get():
-            self.empty_space_menu.entryconfigure(self.topmost_menu_index, label="取消置顶")
-        else:
-            self.empty_space_menu.entryconfigure(self.topmost_menu_index, label="窗口置顶")
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="清空列表", command=self.clear_list)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="查看日志", command=self.show_logs)
 
     def update_context_menu(self):
         selected = self.tree.selection()
