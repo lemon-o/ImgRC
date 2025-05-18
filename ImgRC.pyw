@@ -92,6 +92,7 @@ class ImageRecognitionApp:
         self.from_step = False
         self.need_retake_screenshot = False
         self.import_config_success = False
+        self.screen_scale = 1
         self.follow_current_step = tk.BooleanVar(value=False)  # 控制是否跟随当前步骤
         self.only_keyboard_var = tk.BooleanVar(value=False)  # 控制是否只进行键盘操作
         self.init_ui()
@@ -439,6 +440,16 @@ class ImageRecognitionApp:
         # 设置窗口的位置和大小
         self.root.geometry(f"{window_width}x{window_height}+{x}+{y}")
         
+    # 获取屏幕缩放比例
+    def get_screen_scale(self):
+        try:
+            user32 = ctypes.windll.user32
+            dpi = user32.GetDpiForSystem()  # 获取DPI
+            self.screen_scale = dpi / 96 # 屏幕缩放比例
+        except Exception as e:
+            print(f"获取屏幕缩放比例失败: {e}")
+            self.screen_scale = 1
+
     def load_default_image(self):
         try:
             # 基准分辨率和原始最大预览尺寸
@@ -1356,9 +1367,6 @@ class ImageRecognitionApp:
             # 设置停止标志（如果线程支持）
             self.running = False
             
-            # 尝试正常停止
-            self.thread.join(timeout=1)  # 等待1秒
-            
             if self.thread.is_alive():
                 # 强制终止线程（不推荐，但可用）
                 try:
@@ -1626,21 +1634,33 @@ class ImageRecognitionApp:
             # 获取屏幕分辨率
             screen_width = self.root.winfo_screenwidth()
             screen_height = self.root.winfo_screenheight()
-            
-            # 根据分辨率设置对话框尺寸
+
+            # 根据分辨率和缩放比例设置对话框尺寸
+            self.get_screen_scale()
             if screen_width >= 1920 and screen_height >= 1080 and (screen_width < 2560 or screen_height < 1440):
                 # 1080p (1920x1080) 到小于 1440p 的情况
-                dialog_width = 542
-                dialog_height = 490
+                if self.screen_scale == 1.25:  # 125% 缩放
+                    dialog_width = 620
+                    dialog_height = 535
+                elif self.screen_scale == 1:
+                    dialog_width = 542
+                    dialog_height = 490
+                else:
+                    dialog_width = 300
+                    dialog_height = 340
             elif screen_width >= 2560 and screen_height >= 1440 and (screen_width < 3840 or screen_height < 2160):
                 # 1440p (2560x1440) 到小于 2160p (4K) 的情况
-                dialog_width = 630
-                dialog_height = 530
+                if self.screen_scale == 1.25:  # 125% 缩放
+                    dialog_width = 630
+                    dialog_height = 530
+                else:
+                    dialog_width = 630
+                    dialog_height = 530
             else:
                 # 其他情况使用默认尺寸
                 dialog_width = 630
                 dialog_height = 530
-            
+
             # 获取主窗口位置和尺寸
             main_x = self.root.winfo_x()
             main_y = self.root.winfo_y()
@@ -1785,16 +1805,28 @@ class ImageRecognitionApp:
         # 获取屏幕分辨率
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
-        
-        # 根据分辨率设置对话框尺寸
+
+        # 根据分辨率和缩放比例设置对话框尺寸
+        self.get_screen_scale()
         if screen_width >= 1920 and screen_height >= 1080 and (screen_width < 2560 or screen_height < 1440):
             # 1080p (1920x1080) 到小于 1440p 的情况
-            dialog_width = 300
-            dialog_height = 340
+            if self.screen_scale == 1.25:  # 125% 缩放
+                dialog_width = 278
+                dialog_height = 390
+            elif self.screen_scale == 1:
+                dialog_width = 300
+                dialog_height = 340
+            else:
+                dialog_width = 300
+                dialog_height = 340
         elif screen_width >= 2560 and screen_height >= 1440 and (screen_width < 3840 or screen_height < 2160):
             # 1440p (2560x1440) 到小于 2160p (4K) 的情况
-            dialog_width = 300
-            dialog_height = 390
+            if self.screen_scale == 1.25:  # 125% 缩放
+                dialog_width = 300
+                dialog_height = 390
+            else:
+                dialog_width = 300
+                dialog_height = 340
         else:
             # 其他情况使用默认尺寸
             dialog_width = 300
@@ -1997,6 +2029,162 @@ class ImageRecognitionApp:
         center_x = main_x + (main_width - dialog_width) // 2
         center_y = main_y + (main_height - dialog_height) // 2
         dialog.geometry(f"+{center_x}+{center_y}")
+
+    def offset_coords(self):
+        # 创建对话框
+        dialog = tk.Toplevel(self.root)
+        dialog.title("偏移坐标")
+
+        # 获取当前屏幕分辨率
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        self.get_screen_scale()
+
+        # 设置对话框尺寸
+        if screen_width >= 1920 and screen_height >= 1080 and (screen_width < 2560 or screen_height < 1440):
+            dialog_width = 255 if self.screen_scale == 1.25 else 245
+            dialog_height = 180 if self.screen_scale == 1.25 else 170
+        elif screen_width >= 2560 and screen_height >= 1440 and (screen_width < 3840 or screen_height < 2160):
+            dialog_width = 280
+            dialog_height = 180 if self.screen_scale == 1.25 else 170
+        else:
+            dialog_width = 280
+            dialog_height = 200
+
+        # 居中对话框
+        main_x = self.root.winfo_x()
+        main_y = self.root.winfo_y()
+        main_width = self.root.winfo_width()
+        main_height = self.root.winfo_height()
+        center_x = main_x + (main_width - dialog_width) // 2
+        center_y = main_y + (main_height - dialog_height) // 2
+        dialog.geometry(f"{dialog_width}x{dialog_height}+{center_x}+{center_y}")
+
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        # 创建输入框
+        input_frame = tk.Frame(dialog)
+        input_frame.pack(pady=10)
+
+        tk.Label(input_frame, text="X 偏移量:").grid(row=0, column=0, padx=5, pady=5, sticky='e')
+        x_entry = tk.Entry(input_frame, width=10)
+        x_entry.insert(0, "0")  # 设置X偏移量默认值为0
+        x_entry.grid(row=0, column=1, padx=5, pady=5)
+
+        tk.Label(input_frame, text="Y 偏移量:").grid(row=1, column=0, padx=5, pady=5, sticky='e')
+        y_entry = tk.Entry(input_frame, width=10)
+        y_entry.insert(0, "0")  # 设置Y偏移量默认值为0
+        y_entry.grid(row=1, column=1, padx=5, pady=5)
+
+        # 应用于所有步骤的复选框
+        apply_all_var = tk.BooleanVar()
+        apply_all_check = ttk.Checkbutton(dialog, text="应用于所有步骤", variable=apply_all_var, bootstyle="secondary")
+        apply_all_check.pack(pady=5)
+
+        def on_save():
+            try:
+                offset_x = int(x_entry.get())
+                offset_y = int(y_entry.get())
+            except ValueError:
+                messagebox.showerror("错误", "请输入有效的整数偏移量。")
+                return
+
+            def process_mouse_info(mouse_info):
+                current_action = "click"
+                current_coords = ""
+                current_dynamic = False
+                current_count = "1"
+
+                if mouse_info:
+                    try:
+                        parts = mouse_info.split(":")
+                        if len(parts) >= 3:
+                            current_action = parts[0]
+                            current_coords = parts[1]
+                            current_dynamic = parts[2] == "1"
+                            if current_action in ["click", "scrollUp", "scrollDown"] and len(parts) == 4:
+                                current_count = parts[3]
+                        else:
+                            current_coords = mouse_info
+                    except:
+                        return None
+
+                try:
+                    x, y = map(int, current_coords.split(","))
+                    new_x = x + offset_x
+                    new_y = y + offset_y
+                    
+                    # 检查坐标是否超出屏幕范围
+                    if new_x < 0 or new_y < 0:
+                        return "NEGATIVE"
+                    if new_x > screen_width or new_y > screen_height:
+                        return "OUT_OF_BOUNDS"
+                        
+                except:
+                    return None
+
+                new_mouse_info = f"{current_action}:{new_x},{new_y}:{'1' if current_dynamic else '0'}"
+                if current_action in ["click", "scrollUp", "scrollDown"]:
+                    new_mouse_info += f":{current_count}"
+                return new_mouse_info
+
+            if apply_all_var.get():
+                for i in range(len(self.image_list)):
+                    image = self.image_list[i]
+                    new_mouse_info = process_mouse_info(image[4])
+                    if new_mouse_info == "NEGATIVE":
+                        messagebox.showerror("错误", "偏移结果存在负坐标，请重新设置偏移量。")
+                        return
+                    if new_mouse_info == "OUT_OF_BOUNDS":
+                        messagebox.showerror("错误", f"偏移结果超出屏幕范围(当前屏幕分辨率:{screen_width}x{screen_height})，请重新设置偏移量。")
+                        return
+                    if new_mouse_info:
+                        self.image_list[i] = (*image[:4], new_mouse_info, *image[5:])
+            else:
+                selected_items = self.tree.selection()
+                if not selected_items:
+                    return
+
+                selected_item = selected_items[0]
+                selected_index = self.tree.index(selected_item)
+                selected_image = self.image_list[selected_index]
+
+                new_mouse_info = process_mouse_info(selected_image[4])
+                if new_mouse_info == "NEGATIVE":
+                    messagebox.showerror("错误", "偏移结果存在负坐标，请重新设置偏移量。")
+                    return
+                if new_mouse_info == "OUT_OF_BOUNDS":
+                    messagebox.showerror("错误", f"偏移结果超出屏幕范围(当前屏幕分辨率:{screen_width}x{screen_height})，请重新设置偏移量。")
+                    return
+                if new_mouse_info:
+                    self.image_list[selected_index] = (*selected_image[:4], new_mouse_info, *selected_image[5:])
+
+            self.update_image_listbox()
+            dialog.destroy()
+
+        # 按钮框架
+        btn_frame = tk.Frame(dialog)
+        btn_frame.pack(pady=10)
+
+        # 在创建按钮时添加bootstyle参数
+        save_button = ttk.Button(
+            btn_frame, 
+            text="保存", 
+            command=on_save,
+            bootstyle="primary-outline"  # 主要轮廓样式
+        )
+        save_button.pack(side=tk.RIGHT, padx=5)
+
+        cancel_button = ttk.Button(
+            btn_frame, 
+            text="取消", 
+            command=dialog.destroy,
+            bootstyle="primary-outline"  # 次要轮廓样式
+        )
+        cancel_button.pack(side=tk.RIGHT, padx=5)
+        
+        dialog.iconbitmap("icon/app.ico")  # 设置窗口图标
 
     def save_config(self):
         # 构造配置字典，过滤掉不存在的图片
@@ -2214,8 +2402,15 @@ class ImageRecognitionApp:
             scrollbar.config(command=listbox.yview)
             listbox.config(yscrollcommand=scrollbar.set)
 
+            # 获取当前已加载的配置文件名（如果有）
+            current_loaded = os.path.basename(self.config_filename) if hasattr(self, 'config_filename') and self.config_filename else None
+
             for config_file in config_files:
-                listbox.insert(tk.END, config_file)
+                # 如果这个配置文件是当前已加载的，添加后缀
+                display_name = config_file
+                if current_loaded and config_file == current_loaded:
+                    display_name = f"{config_file} (当前配置)"
+                listbox.insert(tk.END, display_name)
 
             # 使用grid布局让列表框和滚动条并排
             listbox.grid(row=0, column=0, sticky="nsew")
@@ -2246,7 +2441,9 @@ class ImageRecognitionApp:
                     messagebox.showwarning("警告", "请选择一个配置文件", parent=dialog)
                     return
                 global selected_config
-                selected_config = config_files[selection[0]]
+                # 获取原始文件名（去掉可能添加的后缀）
+                selected_display = listbox.get(selection[0])
+                selected_config = selected_display.split(" (当前配置)")[0]
                 dialog.destroy()
 
             def on_cancel():
@@ -2788,9 +2985,9 @@ class ImageRecognitionApp:
 
         # 选中项的菜单
         self.context_menu = tk.Menu(self.root, tearoff=0, postcommand=self.update_context_menu)   
-        self.context_menu.add_command(label="条件跳转", command=self.set_condition_jump) #索引0
-        self.context_menu.add_command(label="关闭识图", command=self.Image_recognition_click)  # 默认显示为“关闭识图”，索引1
         self.context_menu.add_command(label="重新截图", command=self.retake_screenshot)
+        self.context_menu.add_command(label="关闭识图", command=self.Image_recognition_click)  # 默认显示为“关闭识图”，索引1
+        self.context_menu.add_command(label="条件跳转", command=self.set_condition_jump)
         self.context_menu.add_separator() #索引3
 
         self.context_menu.add_command(label="复制", command=self.copy_item)
@@ -2800,11 +2997,12 @@ class ImageRecognitionApp:
         self.context_menu.add_command(label="禁用", command=self.toggle_disable_status)  # 注意保持为“禁用”，索引8
         self.context_menu.add_separator()
 
-        self.context_menu.add_command(label="步骤名称", command=self.edit_image_name)
+        self.context_menu.add_command(label="重命名", command=self.edit_image_name)
         self.context_menu.add_command(label="延时ms", command=self.edit_wait_time)
         self.context_menu.add_command(label="相似度", command=self.edit_similarity_threshold)
         self.context_menu.add_command(label="键盘动作", command=self.edit_keyboard_input)
         self.context_menu.add_command(label="鼠标动作", command=self.edit_mouse_action)
+        self.context_menu.add_command(label="偏移坐标", command=self.offset_coords)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="从此步骤运行", command=self.start_from_step)
         self.context_menu.add_separator()
@@ -2894,12 +3092,11 @@ class ImageRecognitionApp:
         self.update_image_listbox()
 
     def start_from_step(self):
-        selected_items = self.tree.selection()
-        if not selected_items:
-            messagebox.showwarning("警告", "请先选择一个项目进行操作")
-            return
         self.from_step = True
-        self.toggle_script()  
+        if not self.running:
+            self.toggle_script()  
+        else:
+            messagebox.showinfo("提示", "请先点击【停止运行】")
 
     def show_context_menu(self, event):
         item = self.tree.identify_row(event.y)
