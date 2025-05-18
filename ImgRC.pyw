@@ -93,7 +93,6 @@ class ImageRecognitionApp:
         self.current_step_name = None # 初始化
         self.from_step = False
         self.need_retake_screenshot = False
-        self.import_config_success = False
         self.import_and_load = False
         self.screen_scale = 1
         self.follow_current_step = tk.BooleanVar(value=False)  # 控制是否跟随当前步骤
@@ -2823,6 +2822,8 @@ class ImageRecognitionApp:
                         shutil.copytree(src_images, dst_images)
                     
                     shutil.rmtree(temp_dir)
+                    self.import_and_load = True
+                    self.load_selected_config() 
                     messagebox.showinfo("导入成功", f"配置文件及关联图片已成功导入！")
             
             # 处理JSON文件导入
@@ -2841,16 +2842,13 @@ class ImageRecognitionApp:
                     if os.path.exists(new_image_folder):
                         shutil.rmtree(new_image_folder)
                     shutil.copytree(image_folder, new_image_folder)
-                
+                self.import_and_load = True
+                self.load_selected_config()   
                 messagebox.showinfo("导入成功", f"配置文件及关联图片已成功导入！")
-                
-            self.import_and_load = True
                 
         except Exception as e:
             logging.error(f"导入配置时出错: {str(e)}")
             messagebox.showerror("导入失败", f"导入配置时出错: {str(e)}")
-        self.import_config_success = True
-        self.load_selected_config()
 
     def delete_config(self, dialog, listbox, working_dir):
         """删除选中的配置文件及其关联文件夹"""
@@ -2858,19 +2856,28 @@ class ImageRecognitionApp:
         if not selection:
             messagebox.showwarning("警告", "请先选择一个配置文件", parent=dialog)
             return
-        config_file = listbox.get(selection[0])
+        config_file = listbox.get(selection[0]).replace("(当前配置)", "").strip()
         config_path = os.path.join(working_dir, config_file)
-        # 获取关联文件夹名称（假设与配置文件同名但无扩展名）
+        # 获取关联文件夹名称
         folder_name = os.path.splitext(config_file)[0]
         folder_path = os.path.join(self.screenshot_folder, folder_name)
-        
-        # 确认删除
-        confirm = messagebox.askyesno("确认删除", 
-                                    f"确定要删除以下内容吗？\n配置文件: {config_file}\n关联文件夹: {folder_name}",
-                                    parent=dialog)
+
+        if config_path == self.config_filename:    
+            # 确认删除
+            confirm = messagebox.askokcancel("警告", 
+                                        f"正在加载当前配置，确认删除后，加载的配置将丢失！\n【以下内容将被删除】\n配置文件: {config_file}\n关联文件夹: {folder_name}",
+                                        icon="warning",  # 添加警告图标
+                                        parent=dialog)  
+        else:
+            # 确认删除
+            confirm = messagebox.askyesno("确认删除", 
+                                        f"确定要删除以下内容吗？\n配置文件: {config_file}\n关联文件夹: {folder_name}",
+                                        parent=dialog)
         if not confirm:
             return    
         try:
+            if config_path == self.config_filename:
+                self.clear_list()
             # 删除配置文件
             if os.path.exists(config_path):
                 os.remove(config_path)       
@@ -2879,7 +2886,6 @@ class ImageRecognitionApp:
                 shutil.rmtree(folder_path)       
             # 从列表框中移除
             listbox.delete(selection[0])        
-            messagebox.showinfo("成功", "配置及关联文件夹已成功删除", parent=dialog)
         except Exception as e:
             messagebox.showerror("错误", f"删除时出错: {str(e)}", parent=dialog)
             logging.error(f"删除配置文件时出错: {str(e)}")
