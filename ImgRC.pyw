@@ -674,7 +674,9 @@ class ImageRecognitionApp:
             # 解析热键字符串
             hotkey_str = self.hotkey.replace('<', '').replace('>', '').lower()
             keyboard.add_hotkey(hotkey_str, hotkey_callback)
-             
+            
+            print(f"-------------------------------------------------------------------------------------")
+            logging.info(f"-------------------------------------------------------------------------------------")             
             print(f"全局热键已注册：{self.hotkey}")
             logging.info(f"程序启动")
         except Exception as e:
@@ -1209,9 +1211,12 @@ class ImageRecognitionApp:
             self.current_step_name = item_values[1] if item_values and len(item_values) > 1 else "未知步骤"
         else:
             self.current_step_name = "无效步骤索引"
-
-        print(f"从【{self.current_step_name}】开始执行，循环{self.loop_count}次")
-        logging.info(f"从【{self.current_step_name}】开始执行，循环{self.loop_count}次")
+        if self.loop_count == 0:
+            print(f"从【{self.current_step_name}】开始执行，无限循环")
+            logging.info(f"从【{self.current_step_name}】开始执行，无限循环")            
+        else:
+            print(f"从【{self.current_step_name}】开始执行，循环{self.loop_count}次")
+            logging.info(f"从【{self.current_step_name}】开始执行，循环{self.loop_count}次")
 
         # 初始化步骤索引映射，假定步骤名称唯一
         self.step_index_map = {step[1]: idx for idx, step in enumerate(self.image_list)}
@@ -1222,8 +1227,8 @@ class ImageRecognitionApp:
             if self.paused:
                 time.sleep(0.1)
                 continue
-            print(f"开始执行第{self.current_loop + 1}次循环")
-            logging.info(f"开始执行第{self.current_loop + 1}次循环")
+            print(f">>开始执行第{self.current_loop + 1}次循环<<")
+            logging.info(f">>开始执行第{self.current_loop + 1}次循环<<")
             index = self.start_step_index
             while index < len(self.image_list) and self.running:
                 # 获取当前 TreeView 项
@@ -1388,13 +1393,15 @@ class ImageRecognitionApp:
         self.root.after(0, self.update_ui_after_stop)
 
         result = self.loop_count - self.current_loop  # 计算结果
-        display_value = max(1, result)  # 如果结果为负数，则设为 1
+        display_value = max(0, result)  # 如果结果为负数，则设为 0
         self.loop_count_entry.delete(0, "end")  # 清空当前内容
         self.loop_count_entry.insert(0, str(display_value))  # 插入新值（确保非负）
         self.loop_count = int(self.loop_count_entry.get())
         
         print(f"脚本已停止在第{self.current_loop}次循环的【{self.current_step_name}】")
         logging.info(f"脚本已停止在第{self.current_loop}次循环的【{self.current_step_name}】")
+        print(f"-------------------------------------------------------------------------------------")
+        logging.info(f"-------------------------------------------------------------------------------------")  
    
     def update_ui_after_stop(self):
         self.toggle_run_button.config(text="开始运行(F9)")   
@@ -2313,12 +2320,19 @@ class ImageRecognitionApp:
             for img_data in config['image_list']:
                 old_path = img_data[0]
                 new_path = os.path.join(new_folder_path, os.path.basename(old_path))
+                
+                # 如果新旧路径相同，则跳过复制
+                if os.path.abspath(old_path) == os.path.abspath(new_path):
+                    new_img_data = (old_path,) + tuple(img_data[1:])  # 直接使用原路径
+                    updated_image_list.append(new_img_data)
+                    continue  # 跳过后续复制操作
+                
                 try:
                     shutil.copy2(old_path, new_path)
                     logging.info(f"图片复制成功: {old_path} -> {new_path}")
                 except Exception as copy_err:
                     logging.error(f"复制图片 {old_path} 时出错: {copy_err}")
-                    new_path = old_path  # 复制失败则保留旧路径
+                    new_path = old_path  # 复制失败则回退到原路径
 
                 new_img_data = (new_path,) + tuple(img_data[1:])
                 updated_image_list.append(new_img_data)
