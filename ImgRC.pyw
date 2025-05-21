@@ -2052,10 +2052,10 @@ class ImageRecognitionApp:
         # 设置对话框尺寸
         if screen_width >= 1920 and screen_height >= 1080 and (screen_width < 2560 or screen_height < 1440):
             dialog_width = 255 if self.screen_scale == 1.25 else 245
-            dialog_height = 180 if self.screen_scale == 1.25 else 170
+            dialog_height = 180 if self.screen_scale == 1.25 else 185
         elif screen_width >= 2560 and screen_height >= 1440 and (screen_width < 3840 or screen_height < 2160):
             dialog_width = 280
-            dialog_height = 180 if self.screen_scale == 1.25 else 170
+            dialog_height = 195 if self.screen_scale == 1.25 else 185
         else:
             dialog_width = 280
             dialog_height = 200
@@ -2078,18 +2078,90 @@ class ImageRecognitionApp:
 
         tk.Label(input_frame, text="X 偏移量:").grid(row=0, column=0, padx=5, pady=5, sticky='e')
         x_entry = tk.Entry(input_frame, width=10)
-        x_entry.insert(0, "0")  # 设置X偏移量默认值为0
+        x_entry.insert(0, "0")  # 默认值0
         x_entry.grid(row=0, column=1, padx=5, pady=5)
 
         tk.Label(input_frame, text="Y 偏移量:").grid(row=1, column=0, padx=5, pady=5, sticky='e')
         y_entry = tk.Entry(input_frame, width=10)
-        y_entry.insert(0, "0")  # 设置Y偏移量默认值为0
+        y_entry.insert(0, "0")  # 默认值0
         y_entry.grid(row=1, column=1, padx=5, pady=5)
 
-        # 应用于所有步骤的复选框
-        apply_all_var = tk.BooleanVar()
-        apply_all_check = ttk.Checkbutton(dialog, text="应用于所有步骤", variable=apply_all_var, bootstyle="secondary")
-        apply_all_check.pack(pady=5)
+        # 存储要偏移的步骤索引
+        selected_indices = []
+
+        def select_steps():
+            sel_dialog = tk.Toplevel(dialog)
+            sel_dialog.title("选择更多步骤")
+            sel_dialog.transient(dialog)
+            sel_dialog.grab_set()
+
+            # 获取初始选中：优先已选列表，否则使用 Tree 选中
+            if selected_indices:
+                initial = set(selected_indices)
+            else:
+                initial = {self.tree.index(sel) for sel in self.tree.selection()}
+
+            # 列表框及滚动条
+            list_frame = tk.Frame(sel_dialog)
+            list_frame.pack(padx=10, pady=(10, 0), fill='both', expand=True)
+
+            scrollbar = tk.Scrollbar(list_frame, orient='vertical')
+            listbox = tk.Listbox(list_frame, selectmode='multiple', yscrollcommand=scrollbar.set)
+            scrollbar.config(command=listbox.yview)
+            scrollbar.pack(side='right', fill='y')
+            listbox.pack(side='left', fill='both', expand=True)
+
+            # 支持 Shift 范围选择
+            last_click = {'index': None}
+            def on_click(event):
+                idx = listbox.nearest(event.y)
+                shift = (event.state & 0x0001) != 0
+                if shift and last_click['index'] is not None:
+                    start, end = sorted([last_click['index'], idx])
+                    listbox.selection_set(start, end)
+                else:
+                    if listbox.selection_includes(idx):
+                        listbox.selection_clear(idx)
+                    else:
+                        listbox.selection_set(idx)
+                    last_click['index'] = idx
+                return "break"
+            listbox.bind('<Button-1>', on_click)
+
+            # 插入步骤
+            for idx, image in enumerate(self.image_list):
+                listbox.insert('end', image[1])
+                if idx in initial:
+                    listbox.selection_set(idx)
+
+            # 全选复选框
+            all_var = tk.BooleanVar(value=False)
+            def toggle_all():
+                if all_var.get():
+                    listbox.select_set(0, 'end')
+                else:
+                    listbox.select_clear(0, 'end')
+            all_check = ttk.Checkbutton(sel_dialog, text="全选", variable=all_var, command=toggle_all, bootstyle="secondary")
+            all_check.pack(anchor='w', padx=10, pady=(5, 0))
+
+            # 应用/取消按钮区域
+            btn_frame2 = tk.Frame(sel_dialog)
+            btn_frame2.pack(pady=10, fill='x')
+            ok_btn = ttk.Button(btn_frame2, text="应用", command=lambda: (set_selected(), sel_dialog.destroy()), bootstyle="primary-outline")
+            ok_btn.pack(side=tk.RIGHT, padx=5)
+            cancel_btn = ttk.Button(btn_frame2, text="取消", command=sel_dialog.destroy, bootstyle="primary-outline")
+            cancel_btn.pack(side=tk.RIGHT)
+
+            def set_selected():
+                nonlocal selected_indices
+                selected_indices = list(listbox.curselection())
+
+            # 居中对话框
+            sel_dialog.update_idletasks()
+            pw, ph = dialog.winfo_width(), dialog.winfo_height()
+            px, py = dialog.winfo_x(), dialog.winfo_y()
+            w, h = sel_dialog.winfo_width(), sel_dialog.winfo_height()
+            sel_dialog.geometry(f"{w}x{h}+{px + (pw - w) // 2}+{py + (ph - h) // 2}")
 
         def on_save():
             try:
@@ -2100,74 +2172,43 @@ class ImageRecognitionApp:
                 return
 
             def process_mouse_info(mouse_info):
-                current_action = "click"
-                current_coords = ""
-                current_dynamic = False
-                current_count = "1"
-
+                current_action, current_coords, current_dynamic, current_count = "click", "", False, "1"
                 if mouse_info:
-                    try:
-                        parts = mouse_info.split(":")
-                        if len(parts) >= 3:
-                            current_action = parts[0]
-                            current_coords = parts[1]
-                            current_dynamic = parts[2] == "1"
-                            if current_action in ["click", "scrollUp", "scrollDown"] and len(parts) == 4:
-                                current_count = parts[3]
-                        else:
-                            current_coords = mouse_info
-                    except:
-                        return None
-
+                    parts = mouse_info.split(":")
+                    if len(parts) >= 3:
+                        current_action, current_coords = parts[0], parts[1]
+                        current_dynamic = parts[2] == "1"
+                        if current_action in ["click","scrollUp","scrollDown"] and len(parts) == 4:
+                            current_count = parts[3]
+                    else:
+                        current_coords = mouse_info
                 try:
                     x, y = map(int, current_coords.split(","))
-                    new_x = x + offset_x
-                    new_y = y + offset_y
-                    
-                    # 检查坐标是否超出屏幕范围
-                    if new_x < 0 or new_y < 0:
-                        return "NEGATIVE"
-                    if new_x > screen_width or new_y > screen_height:
-                        return "OUT_OF_BOUNDS"
-                        
+                    new_x, new_y = x + offset_x, y + offset_y
+                    if new_x < 0 or new_y < 0: return "NEGATIVE"
+                    if new_x > screen_width or new_y > screen_height: return "OUT_OF_BOUNDS"
                 except:
                     return None
+                new_info = f"{current_action}:{new_x},{new_y}:{'1' if current_dynamic else '0'}"
+                if current_action in ["click","scrollUp","scrollDown"]:
+                    new_info += f":{current_count}"
+                return new_info
 
-                new_mouse_info = f"{current_action}:{new_x},{new_y}:{'1' if current_dynamic else '0'}"
-                if current_action in ["click", "scrollUp", "scrollDown"]:
-                    new_mouse_info += f":{current_count}"
-                return new_mouse_info
+            targets = selected_indices or [self.tree.index(self.tree.selection()[0])] if self.tree.selection() else []
+            if not targets:
+                return
 
-            if apply_all_var.get():
-                for i in range(len(self.image_list)):
-                    image = self.image_list[i]
-                    new_mouse_info = process_mouse_info(image[4])
-                    if new_mouse_info == "NEGATIVE":
-                        messagebox.showerror("错误", "偏移结果存在负坐标，请重新设置偏移量。")
-                        return
-                    if new_mouse_info == "OUT_OF_BOUNDS":
-                        messagebox.showerror("错误", f"偏移结果超出屏幕范围(当前屏幕分辨率:{screen_width}x{screen_height})，请重新设置偏移量。")
-                        return
-                    if new_mouse_info:
-                        self.image_list[i] = (*image[:4], new_mouse_info, *image[5:])
-            else:
-                selected_items = self.tree.selection()
-                if not selected_items:
-                    return
-
-                selected_item = selected_items[0]
-                selected_index = self.tree.index(selected_item)
-                selected_image = self.image_list[selected_index]
-
-                new_mouse_info = process_mouse_info(selected_image[4])
-                if new_mouse_info == "NEGATIVE":
+            for i in targets:
+                image = self.image_list[i]
+                new_info = process_mouse_info(image[4])
+                if new_info == "NEGATIVE":
                     messagebox.showerror("错误", "偏移结果存在负坐标，请重新设置偏移量。")
                     return
-                if new_mouse_info == "OUT_OF_BOUNDS":
-                    messagebox.showerror("错误", f"偏移结果超出屏幕范围(当前屏幕分辨率:{screen_width}x{screen_height})，请重新设置偏移量。")
+                if new_info == "OUT_OF_BOUNDS":
+                    messagebox.showerror("错误", f"偏移结果超出屏幕范围({screen_width}x{screen_height})，请重新设置偏移量。")
                     return
-                if new_mouse_info:
-                    self.image_list[selected_index] = (*selected_image[:4], new_mouse_info, *selected_image[5:])
+                if new_info:
+                    self.image_list[i] = (*image[:4], new_info, *image[5:])
 
             self.update_image_listbox()
             dialog.destroy()
@@ -2176,24 +2217,37 @@ class ImageRecognitionApp:
         btn_frame = tk.Frame(dialog)
         btn_frame.pack(pady=10)
 
-        # 在创建按钮时添加bootstyle参数
-        save_button = ttk.Button(
-            btn_frame, 
-            text="保存", 
-            command=on_save,
-            bootstyle="primary-outline"  # 主要轮廓样式
+        # 第一行：单独一个“应用于其他步骤”按钮
+        apply_btn = ttk.Button(
+            btn_frame,
+            text="应用于其他步骤",
+            command=select_steps,      # 你的处理函数
+            bootstyle="primary-outline"
         )
-        save_button.pack(side=tk.RIGHT, padx=5)
+        apply_btn.grid(row=0, column=0, padx=5, pady=5)
 
-        cancel_button = ttk.Button(
-            btn_frame, 
-            text="取消", 
+        # 第二行：一个子Frame，承载“取消”“保存”两个按钮
+        sub_frame = tk.Frame(btn_frame)
+        sub_frame.grid(row=1, column=0, pady=5)
+
+        cancel_btn = ttk.Button(
+            sub_frame,
+            text="取消",
             command=dialog.destroy,
-            bootstyle="primary-outline"  # 次要轮廓样式
+            bootstyle="primary-outline"
         )
-        cancel_button.pack(side=tk.RIGHT, padx=5)
-        
-        dialog.iconbitmap("icon/app.ico")  # 设置窗口图标
+        cancel_btn.pack(side=tk.LEFT, padx=5)
+
+        save_btn = ttk.Button(
+            sub_frame,
+            text="保存",
+            command=on_save,
+            bootstyle="primary-outline"
+        )
+        save_btn.pack(side=tk.LEFT, padx=5)
+        btn_frame.grid_columnconfigure(0, weight=1)
+
+        dialog.iconbitmap("icon/app.ico")
 
     def save_config(self):
         # 构造配置字典，过滤掉不存在的图片
