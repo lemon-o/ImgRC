@@ -103,10 +103,10 @@ class ImageRecognitionApp:
         self.init_logging()
         self.bind_arrow_keys()
         self.create_context_menu()
-        self.load_last_used_config() #加载上次的配置文件
         atexit.register(self.cleanup_on_exit)
         self.hotkey_id = None # 初始化热键id
         self.register_global_hotkey() # 注册全局热键  
+        self.load_last_used_config() #加载上次的配置文件
 
     def init_ui(self):
         # 主框架布局
