@@ -618,47 +618,55 @@ class ImageRecognitionApp:
 
     def update_label(self, event=None):
         """更新 Label 显示 Treeview 选中的隐藏列数据（带可靠的悬停提示功能）"""
-        def 截断文本(文本, 最大长度=37):
+        def 截断文本(文本, 最大长度=25):
             """辅助函数：当文本超过最大长度时添加省略号"""
             文本 = str(文本)
             return 文本[:最大长度-3] + "..." if len(文本) > 最大长度 else 文本
 
         class 悬停提示管理器:
             """管理悬停提示的创建和销毁"""
-            def __init__(self):
+            def __init__(self, master):
+                self.master = master
                 self.当前提示 = None
 
             def 显示提示(self, 控件, 文本):
-                """显示提示窗口"""
-                self.隐藏提示()  # 先关闭之前的提示
-                self.当前提示 = tk.Toplevel()
+                self.隐藏提示()
+                # 处理长文本换行
+                if len(文本) > 37:
+                    文本 = "\n".join(
+                        文本[i:i+37] for i in range(0, len(文本), 37)
+                    )
+                # 使用传入的 master 作为父窗口
+                self.当前提示 = tk.Toplevel(self.master)
                 self.当前提示.wm_overrideredirect(True)
                 x = 控件.winfo_rootx() + 15
                 y = 控件.winfo_rooty() + 控件.winfo_height() + 5
                 self.当前提示.wm_geometry(f"+{x}+{y}")
                 tk.Label(
-                    self.当前提示, 
-                    text=文本, 
-                    bg="#FFFFE0", 
-                    relief="solid", 
+                    self.当前提示,
+                    text=文本,
+                    bg="#FFFFE0",
+                    relief="solid",
                     borderwidth=1,
                     padx=5,
-                    pady=2
+                    pady=2,
+                    justify="left"
                 ).pack()
-                
+
             def 隐藏提示(self):
-                """隐藏当前提示窗口"""
                 if self.当前提示:
                     self.当前提示.destroy()
                     self.当前提示 = None
 
         # 获取当前选中的项目
-        if not (选中项 := self.tree.selection()):
+        sel = self.tree.selection()
+        if not sel:
             self.clear_labels()
             return
         
-        项目值 = self.tree.item(选中项[0], "values")
-        提示管理器 = 悬停提示管理器()  # 创建提示管理器实例
+        values = self.tree.item(sel[0], "values")
+        # 初始化提示管理器时传入 root
+        提示管理器 = 悬停提示管理器(self.root)
 
         # 字段配置 (名称: 索引)
         字段配置 = {
@@ -668,21 +676,25 @@ class ImageRecognitionApp:
         }
 
         for 字段名, 索引 in 字段配置.items():
-            原始值 = str(项目值[索引])
-            显示值 = 截断文本(原始值)
-            标签控件 = self.labels[字段名]
-            
-            标签控件.config(text=f"{字段名}:  {显示值}")
-            标签控件.unbind("<Enter>")  # 移除旧绑定
-            标签控件.unbind("<Leave>")
+            raw = str(values[索引]).replace("\n", " ").strip()
+            disp = 截断文本(raw)
+            lbl = self.labels[字段名]
 
-            if len(原始值) > 37:  # 只为需要截断的文本添加提示
-                标签控件.bind(
-                    "<Enter>", 
-                    lambda e, t=原始值: 提示管理器.显示提示(e.widget, t)
+            # 取消所有旧绑定，并更新文本
+            lbl.unbind("<Enter>")
+            lbl.unbind("<Leave>")
+            lbl.config(text=f"{字段名}:  {disp}",
+                       wraplength=0)
+            lbl.grid(sticky="ew")
+
+            # 超长时才加提示
+            if len(raw) > 25:
+                lbl.bind(
+                    "<Enter>",
+                    lambda e, t=raw: 提示管理器.显示提示(e.widget, t)
                 )
-                标签控件.bind(
-                    "<Leave>", 
+                lbl.bind(
+                    "<Leave>",
                     lambda e: 提示管理器.隐藏提示()
                 )
 
