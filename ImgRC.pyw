@@ -2121,7 +2121,7 @@ class ImageRecognitionApp:
             sel_dialog.transient(dialog)
             sel_dialog.grab_set()
 
-            # 获取初始选中：优先已选列表，否则使用 Tree 选中
+            # 获取初始选中的索引（来自 selected_indices 或 Treeview 当前选中项）
             if selected_indices:
                 initial = set(selected_indices)
             else:
@@ -2138,20 +2138,37 @@ class ImageRecognitionApp:
             listbox.pack(side='left', fill='both', expand=True)
 
             # 支持 Shift 范围选择
-            last_click = {'index': None}
+            # 设置初始选中项（对应 Treeview 的选中项）
+            for idx in initial:
+                listbox.selection_set(idx)
+
+            # 记录初始索引（Treeview 的第一个选中项）
+            initial_index = next(iter(initial)) if initial else None
+            last_click = {'index': initial_index}
+
             def on_click(event):
                 idx = listbox.nearest(event.y)
-                shift = (event.state & 0x0001) != 0
-                if shift and last_click['index'] is not None:
-                    start, end = sorted([last_click['index'], idx])
-                    listbox.selection_set(start, end)
+                shift_pressed = (event.state & 0x0001) != 0  # 检测是否按住 Shift
+
+                if shift_pressed and last_click['index'] is not None:
+                    # 判断当前点击位置是在初始索引的左边还是右边
+                    if idx < last_click['index']:
+                        # 只能选择左边（从 idx 到 initial_index）
+                        listbox.selection_clear(0, tk.END)  # 先清空所有选择
+                        listbox.selection_set(idx, last_click['index'])
+                    else:
+                        # 只能选择右边（从 initial_index 到 idx）
+                        listbox.selection_clear(0, tk.END)
+                        listbox.selection_set(last_click['index'], idx)
                 else:
+                    # 普通点击：切换选中状态
                     if listbox.selection_includes(idx):
                         listbox.selection_clear(idx)
                     else:
                         listbox.selection_set(idx)
-                    last_click['index'] = idx
+                    last_click['index'] = idx  # 更新最后点击的索引
                 return "break"
+
             listbox.bind('<Button-1>', on_click)
 
             # 插入步骤
