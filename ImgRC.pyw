@@ -83,6 +83,7 @@ class ImageRecognitionApp:
         self.delay_time = 0.1  # 默认延迟时间
         self.loop_count = 1  # 默认循环次数
         self.screenshot_folder = 'screenshots'  # 截图保存文件夹
+        self.last_used_config = "last_config.json"  # 用于存储最后使用的配置文件名
         self.paused = False  # 控制脚本是否暂停
         self.copied_item = None
         self.config_filename = None  # 默认配置文件名
@@ -102,6 +103,7 @@ class ImageRecognitionApp:
         self.init_logging()
         self.bind_arrow_keys()
         self.create_context_menu()
+        self.load_last_used_config() #加载上次的配置文件
         atexit.register(self.cleanup_on_exit)
         self.hotkey_id = None # 初始化热键id
         self.register_global_hotkey() # 注册全局热键  
@@ -451,6 +453,29 @@ class ImageRecognitionApp:
         except Exception as e:
             print(f"获取屏幕缩放比例失败: {e}")
             self.screen_scale = 1
+
+    def load_last_used_config(self):
+        """尝试加载最后使用的配置文件"""
+        global selected_config
+        try:
+            # 检查是否有记录的最后使用的配置文件
+            if os.path.exists(self.last_used_config):
+                with open(self.last_used_config, 'r', encoding='utf-8') as f:
+                    last_config = json.load(f)
+                    if 'config_file' in last_config:
+                        selected_config = last_config['config_file']
+                        self.load_selected_config()
+        except Exception as e:
+            print(f"加载最后配置记录失败: {e}")
+        return False
+
+    def save_last_used_config(self, config_file):
+        """保存最后使用的配置文件名"""
+        try:
+            with open(self.last_used_config, 'w', encoding='utf-8') as f:
+                json.dump({'config_file': config_file}, f)
+        except Exception as e:
+            print(f"保存最后配置记录失败: {e}")
 
     def load_default_image(self):
         try:
@@ -1105,6 +1130,7 @@ class ImageRecognitionApp:
         # 在更新列表后如果没有选中项，显示默认图像
         if not self.tree.selection():
             self.load_default_image()
+            self.clear_labels()
 
         # 只有在配置文件名非空且文件存在时才执行更新
         if self.config_filename and os.path.exists(self.config_filename):
@@ -2134,6 +2160,13 @@ class ImageRecognitionApp:
                 if idx in initial:
                     listbox.selection_set(idx)
 
+            # 如果有选中的项目，滚动到第一个选中的项目上方两行
+            if initial:
+                first_selected = min(initial)
+                # 计算向上偏移2行的位置（最小为0）
+                scroll_pos = max(0, first_selected - 2)
+                listbox.see(scroll_pos)
+
             # 全选复选框
             all_var = tk.BooleanVar(value=False)
             def toggle_all():
@@ -2217,10 +2250,10 @@ class ImageRecognitionApp:
         btn_frame = tk.Frame(dialog)
         btn_frame.pack(pady=10)
 
-        # 第一行：单独一个“应用于其他步骤”按钮
+        # 第一行：单独一个“应用于更多步骤”按钮
         apply_btn = ttk.Button(
             btn_frame,
-            text="应用于其他步骤",
+            text="应用于更多步骤",
             command=select_steps,      # 你的处理函数
             bootstyle="primary-outline"
         )
@@ -2324,6 +2357,14 @@ class ImageRecognitionApp:
                 return
             if not filename.endswith('.json'):
                 filename += '.json'
+            
+            # 检查文件是否存在
+            if os.path.exists(filename):
+                # 询问是否覆盖
+                response = messagebox.askyesno("确认", "配置文件已存在，是否覆盖保存？", parent=dialog)
+                if not response:  # 如果用户选择不覆盖
+                    return  # 不执行后续操作
+            
             dialog.destroy()
 
         def on_cancel():
@@ -2413,7 +2454,7 @@ class ImageRecognitionApp:
         working_dir = os.getcwd()
 
         # 查找所有.json配置文件
-        config_files = [f for f in os.listdir(working_dir) if f.endswith('.json')]
+        config_files = [f for f in os.listdir(working_dir) if f.endswith('.json') and f != 'last_config.json']
 
         if not config_files:
             messagebox.showinfo("提示", "没有找到任何配置文件", parent=self.root)
@@ -2561,6 +2602,8 @@ class ImageRecognitionApp:
                 selected_config = self.import_config_filename
             if not selected_config and not self.import_and_load:
                 return False
+            # 保存最后使用的配置
+            self.save_last_used_config(selected_config)
             # 获取程序工作目录
             working_dir = os.getcwd()
             # 加载配置文件
@@ -2925,6 +2968,7 @@ class ImageRecognitionApp:
             messagebox.showwarning("警告", "请先选择一个配置文件", parent=dialog)
             return
         config_file = listbox.get(selection[0]).replace("(当前配置)", "").strip()
+        last_config_record = self.last_used_config
         config_path = os.path.join(working_dir, config_file)
         # 获取关联文件夹名称
         folder_name = os.path.splitext(config_file)[0]
@@ -2951,7 +2995,10 @@ class ImageRecognitionApp:
                 os.remove(config_path)       
             # 删除关联文件夹（如果存在）
             if os.path.exists(folder_path) and os.path.isdir(folder_path):
-                shutil.rmtree(folder_path)       
+                shutil.rmtree(folder_path)  
+            # 清空上一次加载的配置文件记录
+            if os.path.exists(last_config_record):
+                os.remove(last_config_record)       
             # 从列表框中移除
             listbox.delete(selection[0])        
         except Exception as e:
@@ -2972,6 +3019,10 @@ class ImageRecognitionApp:
             self.start_step_index = 0
             self.only_keyboard_var.set(False)
             self.config_filename = None  
+
+            # 清空上一次加载的配置文件记录
+            if os.path.exists(self.last_used_config):
+                os.remove(self.last_used_config)    
                
             # 重置界面元素
             self.update_image_listbox()
@@ -3784,6 +3835,7 @@ class ImageRecognitionApp:
         if not selected_items:
             # 加载默认图像
             self.load_default_image()
+            self.clear_labels()
             return
         selected_item = selected_items[0]
         selected_index = self.tree.index(selected_item)
@@ -3908,7 +3960,21 @@ class ImageRecognitionApp:
         log_window.grab_set()
         log_window.iconbitmap("icon/app.ico")  # 设置窗口图标
 
+
 if __name__ == "__main__":
     root = tk.Tk()
     app = ImageRecognitionApp(root)
+    
+    def on_closing():
+        if app.config_filename is None and app.image_list:
+            response = tk.messagebox.askyesno(
+                "提示",
+                "未保存配置，是否保存？",
+                parent=root
+            )
+            if response: 
+                app.save_config()  
+        root.destroy()
+    
+    root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
