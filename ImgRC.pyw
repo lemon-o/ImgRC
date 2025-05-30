@@ -369,32 +369,46 @@ class ImageRecognitionApp:
         self.region_d = tb.Frame(self.region_r, style="InnerR.TFrame")
         self.region_d.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))  # 关键修改
 
-        # 详细信息标签区域（保持原样）
-        self.label_frame = tk.Frame(self.region_d, width=350)
-        self.label_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=10)
-        self.label_frame.pack_propagate(False)
+        # 详细信息标签区域
+        # —— 第一行：标题 + 文件名 —— #
+        self.label_frame = tk.Frame(self.region_d)
+        self.label_frame.pack(fill="x", pady=(10, 0))
 
-        # 标题标签
+        # 标题“详细信息”
         self.label_title = tk.Label(
             self.label_frame,
             text="详细信息",
             anchor="w",
             font=('Arial', 10, 'bold'),
-            foreground="#3b3b3b"
+            foreground="#495057"
         )
-        self.label_title.pack(fill="x", padx=5, pady=7)
+        self.label_title.pack(side="left", padx=(5, 2))
 
-        # 详细信息标签
+        # 文件名
+        self.label_filename = tk.Label(
+            self.label_frame,
+            text="",          # 会在 update 时填充
+            anchor="w",
+            font=('Arial', 10),
+            foreground="#9D9FA1"
+        )
+        self.label_filename.pack(side="left")
+
+        # —— 第二行：各字段标签 —— #
+        self.labels_frame = tk.Frame(self.region_d)
+        self.labels_frame.pack(fill="x", pady=(10, 5))
+
+        # 初始化字段标签
         self.labels = {
-            "图片名称": tk.Label(self.label_frame, text="图片名称: ", anchor="w"),
-            "相似度": tk.Label(self.label_frame, text="相似度: ", anchor="w"),
-            "坐标(F2)": tk.Label(self.label_frame, text="坐标(F2): ", anchor="w"),
-            "键盘动作": tk.Label(self.label_frame, text="键盘动作: ", anchor="w"),
-            "鼠标动作": tk.Label(self.label_frame, text="鼠标动作: ", anchor="w"),
-            "状态": tk.Label(self.label_frame, text="状态: ", anchor="w"),
-            "条件": tk.Label(self.label_frame, text="条件: ", anchor="w"),
-            "需跳转": tk.Label(self.label_frame, text="需跳转: ", anchor="w"),
-            "需禁用": tk.Label(self.label_frame, text="需禁用: ", anchor="w"),
+            "图片名称": tk.Label(self.labels_frame, text="图片名称: ", anchor="w"),
+            "相似度":   tk.Label(self.labels_frame, text="相似度: ",   anchor="w"),
+            "坐标(F2)": tk.Label(self.labels_frame, text="坐标(F2): ", anchor="w"),
+            "键盘动作": tk.Label(self.labels_frame, text="键盘动作: ", anchor="w"),
+            "鼠标动作": tk.Label(self.labels_frame, text="鼠标动作: ", anchor="w"),
+            "状态":     tk.Label(self.labels_frame, text="状态: ",     anchor="w"),
+            "条件":     tk.Label(self.labels_frame, text="条件: ",     anchor="w"),
+            "需跳转":   tk.Label(self.labels_frame, text="需跳转: ",   anchor="w"),
+            "需禁用":   tk.Label(self.labels_frame, text="需禁用: ",   anchor="w"),
         }
         for lbl in self.labels.values():
             lbl.configure(foreground="#495057")
@@ -668,6 +682,14 @@ class ImageRecognitionApp:
         # 初始化提示管理器时传入 root
         提示管理器 = 悬停提示管理器(self.root)
 
+        # 先更新标题（在字段更新前执行一次）
+        if getattr(self, 'config_filename', None):
+            # 只取路径最后的文件名
+            fname = os.path.basename(self.config_filename)
+            self.label_filename.config(text=f"（{fname}）")
+        else:
+            # 不显示
+            self.label_filename.config(text="")
         # 字段配置 (名称: 索引)
         字段配置 = {
             "图片名称": 0, "相似度": 2, "坐标(F2)": 4,
@@ -683,9 +705,7 @@ class ImageRecognitionApp:
             # 取消所有旧绑定，并更新文本
             lbl.unbind("<Enter>")
             lbl.unbind("<Leave>")
-            lbl.config(text=f"{字段名}:  {disp}",
-                       wraplength=0)
-            lbl.grid(sticky="ew")
+            lbl.config(text=f"{字段名}:  {disp}")
 
             # 超长时才加提示
             if len(raw) > 25:
@@ -699,9 +719,12 @@ class ImageRecognitionApp:
                 )
 
     def clear_labels(self):
-        """清空 Label 内容，仅保留标题"""
-        for key in self.labels:
-            self.labels[key].config(text=f"{key}: ")
+        """清空 Label 内容"""
+        # 清空各字段
+        for key, lbl in self.labels.items():
+            lbl.config(text=f"{key}: ")
+        # 清空配置文件名（同一行）
+        self.label_filename.config(text="")
 
     def register_global_hotkey(self):
         try:
@@ -1674,54 +1697,10 @@ class ImageRecognitionApp:
             selected_index = self.tree.index(selected_item)
             selected_image = self.image_list[selected_index]
 
-            # 创建新窗口但不隐藏主窗口
+            # 创建新窗口
             dialog = tk.Toplevel(self.root)
+            dialog.withdraw()                     # 先隐藏
             dialog.title("修改键盘动作")
-            
-            # 获取屏幕分辨率
-            screen_width = self.root.winfo_screenwidth()
-            screen_height = self.root.winfo_screenheight()
-
-            # 根据分辨率和缩放比例设置对话框尺寸
-            self.get_screen_scale()
-            if screen_width >= 1920 and screen_height >= 1080 and (screen_width < 2560 or screen_height < 1440):
-                # 1080p (1920x1080) 到小于 1440p 的情况
-                if self.screen_scale == 1.25:  # 125% 缩放
-                    dialog_width = 620
-                    dialog_height = 535
-                elif self.screen_scale == 1:
-                    dialog_width = 542
-                    dialog_height = 490
-                else:
-                    dialog_width = 300
-                    dialog_height = 340
-            elif screen_width >= 2560 and screen_height >= 1440 and (screen_width < 3840 or screen_height < 2160):
-                # 1440p (2560x1440) 到小于 2160p (4K) 的情况
-                if self.screen_scale == 1.25:  # 125% 缩放
-                    dialog_width = 630
-                    dialog_height = 530
-                else:
-                    dialog_width = 630
-                    dialog_height = 530
-            else:
-                # 其他情况使用默认尺寸
-                dialog_width = 630
-                dialog_height = 530
-
-            # 获取主窗口位置和尺寸
-            main_x = self.root.winfo_x()
-            main_y = self.root.winfo_y()
-            main_width = self.root.winfo_width()
-            main_height = self.root.winfo_height()
-            
-            # 计算居中位置
-            center_x = main_x + (main_width - dialog_width) // 2
-            center_y = main_y + (main_height - dialog_height) // 2
-            
-            # 设置对话框位置和大小
-            dialog.geometry(f"{dialog_width}x{dialog_height}+{center_x}+{center_y}")
-            
-            # 设置窗口关系
             dialog.transient(self.root)
             dialog.grab_set()
                 
@@ -1813,7 +1792,6 @@ class ImageRecognitionApp:
                 )
                 self.update_image_listbox()
                 dialog.destroy()
-            dialog.iconbitmap("icon/app.ico")  # 设置窗口图标
             
             # 添加保存和取消按钮
             button_frame = tk.Frame(dialog)
@@ -1835,7 +1813,26 @@ class ImageRecognitionApp:
                 bootstyle="primary-outline"  # 次要轮廓样式
             )
             cancel_button.pack(side=tk.RIGHT, padx=5)
-   
+
+            # 让 Tkinter 计算理想大小
+            dialog.update_idletasks()
+            w = dialog.winfo_reqwidth()
+            h = dialog.winfo_reqheight()
+
+            # 计算居中位置
+            main_x = self.root.winfo_x()
+            main_y = self.root.winfo_y()
+            main_w = self.root.winfo_width()
+            main_h = self.root.winfo_height()
+            x = main_x + (main_w - w) // 2
+            y = main_y + (main_h - h) // 2
+
+            # 一次性设置大小和位置，并显示
+            dialog.geometry(f"{w}x{h}+{x}+{y}")
+            dialog.deiconify()
+
+            dialog.iconbitmap("icon/app.ico")
+
     def edit_mouse_action(self):
         selected_items = self.tree.selection()
         if not selected_items:
@@ -1845,52 +1842,10 @@ class ImageRecognitionApp:
         selected_index = self.tree.index(selected_item)
         selected_image = self.image_list[selected_index]
 
-        # 创建对话框（先不显示内容）
+        # 创建对话框
         dialog = tk.Toplevel(self.root)
+        dialog.withdraw()                     # 先隐藏
         dialog.title("设置鼠标操作")
-
-        # 获取屏幕分辨率
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-
-        # 根据分辨率和缩放比例设置对话框尺寸
-        self.get_screen_scale()
-        if screen_width >= 1920 and screen_height >= 1080 and (screen_width < 2560 or screen_height < 1440):
-            # 1080p (1920x1080) 到小于 1440p 的情况
-            if self.screen_scale == 1.25:  # 125% 缩放
-                dialog_width = 278
-                dialog_height = 390
-            elif self.screen_scale == 1:
-                dialog_width = 300
-                dialog_height = 340
-            else:
-                dialog_width = 300
-                dialog_height = 340
-        elif screen_width >= 2560 and screen_height >= 1440 and (screen_width < 3840 or screen_height < 2160):
-            # 1440p (2560x1440) 到小于 2160p (4K) 的情况
-            if self.screen_scale == 1.25:  # 125% 缩放
-                dialog_width = 300
-                dialog_height = 390
-            else:
-                dialog_width = 300
-                dialog_height = 340
-        else:
-            # 其他情况使用默认尺寸
-            dialog_width = 300
-            dialog_height = 390
-
-        # 计算居中位置
-        main_x = self.root.winfo_x()
-        main_y = self.root.winfo_y()
-        main_width = self.root.winfo_width()
-        main_height = self.root.winfo_height()
-        center_x = main_x + (main_width - dialog_width) // 2
-        center_y = main_y + (main_height - dialog_height) // 2
-        
-        # 设置初始几何位置
-        dialog.geometry(f"{dialog_width}x{dialog_height}+{center_x}+{center_y}")
-        
-        # 设置窗口关系
         dialog.transient(self.root)
         dialog.grab_set()
 
@@ -2067,46 +2022,36 @@ class ImageRecognitionApp:
             bootstyle="primary-outline"  
         )
         cancel_button.pack(side=tk.RIGHT, padx=5)
-        dialog.iconbitmap("icon/app.ico")  # 设置窗口图标
 
-        # 最终调整窗口大小（如果需要）
+        # 让 Tkinter 计算理想大小
         dialog.update_idletasks()
-        dialog_width = dialog.winfo_width()
-        dialog_height = dialog.winfo_height()
-        center_x = main_x + (main_width - dialog_width) // 2
-        center_y = main_y + (main_height - dialog_height) // 2
-        dialog.geometry(f"+{center_x}+{center_y}")
+        w = dialog.winfo_reqwidth()
+        h = dialog.winfo_reqheight()
+
+        # 计算居中位置
+        main_x = self.root.winfo_x()
+        main_y = self.root.winfo_y()
+        main_w = self.root.winfo_width()
+        main_h = self.root.winfo_height()
+        x = main_x + (main_w - w) // 2
+        y = main_y + (main_h - h) // 2
+
+        # 一次性设置大小和位置，并显示
+        dialog.geometry(f"{w}x{h}+{x}+{y}")
+        dialog.deiconify()
+
+        dialog.iconbitmap("icon/app.ico")
 
     def offset_coords(self):
-        # 创建对话框
-        dialog = tk.Toplevel(self.root)
-        dialog.title("偏移坐标")
-
+        
         # 获取当前屏幕分辨率
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
         self.get_screen_scale()
 
-        # 设置对话框尺寸
-        if screen_width >= 1920 and screen_height >= 1080 and (screen_width < 2560 or screen_height < 1440):
-            dialog_width = 255 if self.screen_scale == 1.25 else 245
-            dialog_height = 180 if self.screen_scale == 1.25 else 185
-        elif screen_width >= 2560 and screen_height >= 1440 and (screen_width < 3840 or screen_height < 2160):
-            dialog_width = 280
-            dialog_height = 195 if self.screen_scale == 1.25 else 185
-        else:
-            dialog_width = 280
-            dialog_height = 200
-
-        # 居中对话框
-        main_x = self.root.winfo_x()
-        main_y = self.root.winfo_y()
-        main_width = self.root.winfo_width()
-        main_height = self.root.winfo_height()
-        center_x = main_x + (main_width - dialog_width) // 2
-        center_y = main_y + (main_height - dialog_height) // 2
-        dialog.geometry(f"{dialog_width}x{dialog_height}+{center_x}+{center_y}")
-
+        dialog = tk.Toplevel(self.root)
+        dialog.withdraw()                     # 先隐藏
+        dialog.title("偏移坐标")
         dialog.transient(self.root)
         dialog.grab_set()
 
@@ -2129,6 +2074,7 @@ class ImageRecognitionApp:
 
         def select_steps():
             sel_dialog = tk.Toplevel(dialog)
+            sel_dialog.withdraw()  # 先隐藏窗口
             sel_dialog.title("选择更多步骤")
             sel_dialog.transient(dialog)
             sel_dialog.grab_set()
@@ -2225,6 +2171,9 @@ class ImageRecognitionApp:
             w, h = sel_dialog.winfo_width(), sel_dialog.winfo_height()
             sel_dialog.geometry(f"{w}x{h}+{px + (pw - w) // 2}+{py + (ph - h) // 2}")
 
+            sel_dialog.iconbitmap("icon/app.ico")
+            sel_dialog.deiconify()  # 一次性显示在正确位置
+
         def on_save():
             try:
                 offset_x = int(x_entry.get())
@@ -2309,6 +2258,23 @@ class ImageRecognitionApp:
         save_btn.pack(side=tk.LEFT, padx=5)
         btn_frame.grid_columnconfigure(0, weight=1)
 
+        # 让 Tkinter 计算理想大小
+        dialog.update_idletasks()
+        w = dialog.winfo_reqwidth()
+        h = dialog.winfo_reqheight()
+
+        # 计算居中位置
+        main_x = self.root.winfo_x()
+        main_y = self.root.winfo_y()
+        main_w = self.root.winfo_width()
+        main_h = self.root.winfo_height()
+        x = main_x + (main_w - w) // 2
+        y = main_y + (main_h - h) // 2
+
+        # 一次性设置大小和位置，并显示
+        dialog.geometry(f"{w}x{h}+{x}+{y}")
+        dialog.deiconify()
+
         dialog.iconbitmap("icon/app.ico")
 
     def save_config(self):
@@ -2334,36 +2300,8 @@ class ImageRecognitionApp:
 
         # 创建居中对话框获取配置文件名
         dialog = tk.Toplevel(self.root)
+        dialog.withdraw()                     # 先隐藏
         dialog.title("保存配置")
-        
-        # 计算居中位置
-        main_window_x = self.root.winfo_x()
-        main_window_y = self.root.winfo_y()
-        main_window_width = self.root.winfo_width()
-        main_window_height = self.root.winfo_height()
-        
-        # 获取屏幕分辨率
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        
-        # 根据分辨率设置对话框尺寸
-        if screen_width >= 1920 and screen_height >= 1080 and (screen_width < 2560 or screen_height < 1440):
-            # 1080p (1920x1080) 到小于 1440p 的情况
-            dialog_width = 300
-            dialog_height = 120
-        elif screen_width >= 2560 and screen_height >= 1440 and (screen_width < 3840 or screen_height < 2160):
-            # 1440p (2560x1440) 到小于 2160p (4K) 的情况
-            dialog_width = 300
-            dialog_height = 130
-        else:
-            # 其他情况使用默认尺寸
-            dialog_width = 300
-            dialog_height = 130
-        
-        x = main_window_x + (main_window_width - dialog_width) // 2
-        y = main_window_y + (main_window_height - dialog_height) // 2
-        
-        dialog.geometry(f"{dialog_width}x{dialog_height}+{x}+{y}")
         dialog.transient(self.root)
         dialog.grab_set()
 
@@ -2421,7 +2359,25 @@ class ImageRecognitionApp:
             bootstyle="primary-outline"  
         )
         cancel_button.pack(side=tk.RIGHT, padx=5)
-        dialog.iconbitmap("icon/app.ico")  # 设置窗口图标
+
+        # 让 Tkinter 计算理想大小
+        dialog.update_idletasks()
+        w = dialog.winfo_reqwidth()
+        h = dialog.winfo_reqheight()
+
+        # 计算居中位置
+        main_x = self.root.winfo_x()
+        main_y = self.root.winfo_y()
+        main_w = self.root.winfo_width()
+        main_h = self.root.winfo_height()
+        x = main_x + (main_w - w) // 2
+        y = main_y + (main_h - h) // 2
+
+        # 一次性设置大小和位置，并显示
+        dialog.geometry(f"{w}x{h}+{x}+{y}")
+        dialog.deiconify()
+
+        dialog.iconbitmap("icon/app.ico")
 
         self.root.wait_window(dialog)
 
@@ -2471,6 +2427,7 @@ class ImageRecognitionApp:
             # 简化保存成功提示
             messagebox.showinfo("保存成功", "配置保存成功！", parent=self.root)
             self.image_list = updated_image_list
+            self.update_label()
             
         except Exception as e:
             error_msg = f"保存配置时出错: {str(e)}"
@@ -2489,38 +2446,10 @@ class ImageRecognitionApp:
             messagebox.showinfo("提示", "没有找到任何配置文件", parent=self.root)
             return False
 
-        # 创建居中对话框显示配置文件列表
+        # 创建居中对话框显示配置文件列表   
         dialog = tk.Toplevel(self.root)
+        dialog.withdraw()                     # 先隐藏
         dialog.title("选择配置文件")
-        
-        # 计算居中位置
-        main_window_x = self.root.winfo_x()
-        main_window_y = self.root.winfo_y()
-        main_window_width = self.root.winfo_width()
-        main_window_height = self.root.winfo_height()
-        
-        # 获取屏幕分辨率
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        
-        # 根据分辨率设置对话框尺寸
-        if screen_width >= 1920 and screen_height >= 1080 and (screen_width < 2560 or screen_height < 1440):
-            # 1080p (1920x1080) 到小于 1440p 的情况
-            dialog_width = 400
-            dialog_height = 300
-        elif screen_width >= 2560 and screen_height >= 1440 and (screen_width < 3840 or screen_height < 2160):
-            # 1440p (2560x1440) 到小于 2160p (4K) 的情况
-            dialog_width = 400
-            dialog_height = 310
-        else:
-            # 其他情况使用默认尺寸
-            dialog_width = 400
-            dialog_height = 310
-        
-        x = main_window_x + (main_window_width - dialog_width) // 2
-        y = main_window_y + (main_window_height - dialog_height) // 2
-        
-        dialog.geometry(f"{dialog_width}x{dialog_height}+{x}+{y}")
         dialog.transient(self.root)
         dialog.grab_set()
 
@@ -2618,7 +2547,40 @@ class ImageRecognitionApp:
             bootstyle="primary-outline"  
         )
         cancel_button.pack(side=tk.RIGHT, padx=5)
-        dialog.iconbitmap("icon/app.ico")  # 设置窗口图标
+        
+        # 让 Tkinter 计算“理想”大小
+        dialog.update_idletasks()
+        req_w = dialog.winfo_reqwidth()
+        req_h = dialog.winfo_reqheight()
+
+        # 目标比例 4:3
+        ratio_w, ratio_h = 4, 3
+
+        # 方案 A：以理想宽度 req_w 为基准，计算对应的高度
+        h_based_on_w = int(req_w * ratio_h / ratio_w)
+        # 方案 B：以理想高度 req_h 为基准，计算对应的宽度
+        w_based_on_h = int(req_h * ratio_w / ratio_h)
+
+        # 选择能包下所有控件的最小方案
+        # 如果 h_based_on_w >= req_h，就用 (req_w, h_based_on_w)，否则用 (w_based_on_h, req_h)
+        if h_based_on_w >= req_h:
+            new_w, new_h = req_w, h_based_on_w
+        else:
+            new_w, new_h = w_based_on_h, req_h
+
+        # 计算居中位置
+        main_x = self.root.winfo_x()
+        main_y = self.root.winfo_y()
+        main_w = self.root.winfo_width()
+        main_h = self.root.winfo_height()
+        x = main_x + (main_w - new_w) // 2
+        y = main_y + (main_h - new_h) // 2
+
+        # 一次性设置大小（强制 4:3）和位置，并显示
+        dialog.geometry(f"{new_w}x{new_h}+{x}+{y}")
+        dialog.deiconify()
+
+        dialog.iconbitmap("icon/app.ico")
         
         dialog.protocol("WM_DELETE_WINDOW", on_cancel)
         self.root.wait_window(dialog)
@@ -2746,45 +2708,17 @@ class ImageRecognitionApp:
             working_dir = os.getcwd()
             
             # 查找根目录下的所有 .json 配置文件
-            config_files = [f for f in os.listdir(working_dir) if f.endswith(".json")]
+            config_files = [f for f in os.listdir(working_dir) if f.endswith('.json') and f != 'last_config.json']
             if not config_files:
                 messagebox.showinfo("提示", "没有找到任何配置文件", parent=self.root)
                 return
 
             # 创建一个 Toplevel 窗口
             export_window = tk.Toplevel(self.root)
+            export_window.withdraw()                     # 先隐藏
             export_window.title("选择导出的配置文件")
             export_window.transient(self.root)
             export_window.grab_set()
-
-            # 计算居中位置
-            main_window_x = self.root.winfo_x()
-            main_window_y = self.root.winfo_y()
-            main_window_width = self.root.winfo_width()
-            main_window_height = self.root.winfo_height()
-            
-            # 获取屏幕分辨率
-            screen_width = self.root.winfo_screenwidth()
-            screen_height = self.root.winfo_screenheight()
-            
-            # 根据分辨率设置对话框尺寸
-            if screen_width >= 1920 and screen_height >= 1080 and (screen_width < 2560 or screen_height < 1440):
-                # 1080p (1920x1080) 到小于 1440p 的情况
-                window_width = 400
-                window_height = 300
-            elif screen_width >= 2560 and screen_height >= 1440 and (screen_width < 3840 or screen_height < 2160):
-                # 1440p (2560x1440) 到小于 2160p (4K) 的情况
-                window_width = 400
-                window_height = 310
-            else:
-                # 其他情况使用默认尺寸
-                window_width = 400
-                window_height = 310
-            
-            x = main_window_x + (main_window_width - window_width) // 2
-            y = main_window_y + (main_window_height - window_height) // 2
-            
-            export_window.geometry(f"{window_width}x{window_height}+{x}+{y}")
 
             # 主容器框架
             main_frame = tk.Frame(export_window)
@@ -2888,7 +2822,6 @@ class ImageRecognitionApp:
                     logging.error(f"导出过程中出错: {str(e)}")
                     messagebox.showerror("错误", f"导出过程中出错: {str(e)}", parent=export_window)
 
-
             # 在创建按钮时添加bootstyle参数
             save_button = ttk.Button(
                 button_frame, 
@@ -2907,10 +2840,41 @@ class ImageRecognitionApp:
             cancel_button.pack(side=tk.RIGHT, padx=5)
             export_window.iconbitmap("icon/app.ico")  # 设置窗口图标
 
+            # 让 Tkinter 计算“理想”大小
+            export_window.update_idletasks()
+            req_w = export_window.winfo_reqwidth()
+            req_h = export_window.winfo_reqheight()
+
+            # 目标比例 4:3
+            ratio_w, ratio_h = 4, 3
+
+            # 方案 A：以理想宽度 req_w 为基准，计算对应的高度
+            h_based_on_w = int(req_w * ratio_h / ratio_w)
+            # 方案 B：以理想高度 req_h 为基准，计算对应的宽度
+            w_based_on_h = int(req_h * ratio_w / ratio_h)
+
+            # 选择能包下所有控件的最小方案
+            # 如果 h_based_on_w >= req_h，就用 (req_w, h_based_on_w)，否则用 (w_based_on_h, req_h)
+            if h_based_on_w >= req_h:
+                new_w, new_h = req_w, h_based_on_w
+            else:
+                new_w, new_h = w_based_on_h, req_h
+
+            # 计算居中位置
+            main_x = self.root.winfo_x()
+            main_y = self.root.winfo_y()
+            main_w = self.root.winfo_width()
+            main_h = self.root.winfo_height()
+            x = main_x + (main_w - new_w) // 2
+            y = main_y + (main_h - new_h) // 2
+
+            # 一次性设置大小（强制 4:3）和位置，并显示
+            export_window.geometry(f"{new_w}x{new_h}+{x}+{y}")
+            export_window.deiconify()
+
         except Exception as e:
             logging.error(f"导出配置时出错: {str(e)}")
             messagebox.showerror("导出失败", f"导出配置时出错: {str(e)}", parent=self.root)
-
 
     def import_config(self):
         try:
@@ -3397,36 +3361,18 @@ class ImageRecognitionApp:
         selected_index = self.tree.index(selected_item)
         selected_image = self.image_list[selected_index]
 
-        # 创建对话框（先不显示内容）
         dialog = tk.Toplevel(self.root)
+        dialog.withdraw()                     # 先隐藏
         dialog.title("修改相似度")
-        
-        # 预设对话框大小
-        dialog_width = 300
-        dialog_height = 150
-        
-        # 计算居中位置
-        main_x = self.root.winfo_x()
-        main_y = self.root.winfo_y()
-        main_width = self.root.winfo_width()
-        main_height = self.root.winfo_height()
-        center_x = main_x + (main_width - dialog_width) // 2
-        center_y = main_y + (main_height - dialog_height) // 2
-        
-        # 设置初始几何位置
-        dialog.geometry(f"{dialog_width}x{dialog_height}+{center_x}+{center_y}")
-        
-        # 设置窗口关系
         dialog.transient(self.root)
         dialog.grab_set()
-        dialog.attributes('-topmost', True)
 
         # 标签和输入框
-        label = tk.Label(dialog, text="请输入新的相似度（0 - 1.0）：")
+        label = tk.Label(dialog, text="请输入新的相似度（0 - 1.0）")
         label.pack(padx=10, pady=10)
         
         entry = tk.Entry(dialog)
-        entry.pack(padx=10, pady=10)
+        entry.pack(padx=10, pady=5)
         entry.insert(0, str(selected_image[2]))
 
         # 保存和取消按钮
@@ -3474,16 +3420,25 @@ class ImageRecognitionApp:
             bootstyle="primary-outline"  # 次要轮廓样式
         )
         cancel_button.pack(side=tk.RIGHT, padx=5)
-        dialog.iconbitmap("icon/app.ico")  # 设置窗口图标
 
-        # 最终调整窗口大小（如果需要）
+        # 让 Tkinter 计算理想大小
         dialog.update_idletasks()
-        dialog_width = dialog.winfo_width()
-        dialog_height = dialog.winfo_height()
-        center_x = main_x + (main_width - dialog_width) // 2
-        center_y = main_y + (main_height - dialog_height) // 2
-        dialog.geometry(f"+{center_x}+{center_y}")
+        w = dialog.winfo_reqwidth()
+        h = dialog.winfo_reqheight()
 
+        # 计算居中位置
+        main_x = self.root.winfo_x()
+        main_y = self.root.winfo_y()
+        main_w = self.root.winfo_width()
+        main_h = self.root.winfo_height()
+        x = main_x + (main_w - w) // 2
+        y = main_y + (main_h - h) // 2
+
+        # 一次性设置大小和位置，并显示
+        dialog.geometry(f"{w}x{h}+{x}+{y}")
+        dialog.deiconify()
+
+        dialog.iconbitmap("icon/app.ico")
 
     def edit_wait_time(self):
         selected_items = self.tree.selection()
@@ -3491,38 +3446,18 @@ class ImageRecognitionApp:
             selected_item = selected_items[0]
             selected_index = self.tree.index(selected_item)
             selected_image = self.image_list[selected_index]
-
-            # 创建对话框
+   
             dialog = tk.Toplevel(self.root)
+            dialog.withdraw()                     # 先隐藏
             dialog.title("修改延时ms")
-            
-            # 先设置窗口大小和位置，再显示内容
-            dialog_width = 300  # 根据你的需要调整
-            dialog_height = 150  # 根据你的需要调整
-            
-            # 获取主窗口位置和尺寸
-            main_x = self.root.winfo_x()
-            main_y = self.root.winfo_y()
-            main_width = self.root.winfo_width()
-            main_height = self.root.winfo_height()
-            
-            # 计算居中位置
-            center_x = main_x + (main_width - dialog_width) // 2
-            center_y = main_y + (main_height - dialog_height) // 2
-            
-            # 设置对话框位置和大小
-            dialog.geometry(f"{dialog_width}x{dialog_height}+{center_x}+{center_y}")
-            
-            # 设置窗口关系
             dialog.transient(self.root)
-            dialog.grab_set()  # 模态对话框
-            dialog.attributes('-topmost', True)  # 让窗口置顶
+            dialog.grab_set()
 
             # 标签和输入框
-            label = tk.Label(dialog, text="请输入新的延时ms（毫秒）：")
+            label = tk.Label(dialog, text="请输入新的延时（毫秒）")
             label.pack(padx=10, pady=10)
             entry = tk.Entry(dialog)
-            entry.pack(padx=10, pady=10)
+            entry.pack(padx=10, pady=5)
             entry.insert(0, str(selected_image[5]))
 
             # 保存和取消按钮
@@ -3568,7 +3503,25 @@ class ImageRecognitionApp:
                 bootstyle="primary-outline"  
             )
             cancel_button.pack(side=tk.RIGHT, padx=5)
-            dialog.iconbitmap("icon/app.ico")  # 设置窗口图标
+
+            # 让 Tkinter 计算理想大小
+            dialog.update_idletasks()
+            w = dialog.winfo_reqwidth()
+            h = dialog.winfo_reqheight()
+
+            # 计算居中位置
+            main_x = self.root.winfo_x()
+            main_y = self.root.winfo_y()
+            main_w = self.root.winfo_width()
+            main_h = self.root.winfo_height()
+            x = main_x + (main_w - w) // 2
+            y = main_y + (main_h - h) // 2
+
+            # 一次性设置大小和位置，并显示
+            dialog.geometry(f"{w}x{h}+{x}+{y}")
+            dialog.deiconify()
+
+            dialog.iconbitmap("icon/app.ico")
 
     def Normal_click(self):
         selected_items = self.tree.selection()
@@ -3628,37 +3581,17 @@ class ImageRecognitionApp:
             selected_index = self.tree.index(selected_item)
             selected_image = self.image_list[selected_index]
 
-            # 创建对话框
             dialog = tk.Toplevel(self.root)
-            dialog.title("修改步骤名称")
-            
-            # 先设置窗口大小和位置，再显示内容
-            dialog_width = 300  # 根据你的需要调整
-            dialog_height = 150  # 根据你的需要调整
-            
-            # 获取主窗口位置和尺寸
-            main_x = self.root.winfo_x()
-            main_y = self.root.winfo_y()
-            main_width = self.root.winfo_width()
-            main_height = self.root.winfo_height()
-            
-            # 计算居中位置
-            center_x = main_x + (main_width - dialog_width) // 2
-            center_y = main_y + (main_height - dialog_height) // 2
-            
-            # 设置对话框位置和大小
-            dialog.geometry(f"{dialog_width}x{dialog_height}+{center_x}+{center_y}")
-            
-            # 设置窗口关系
+            dialog.withdraw()                     # 先隐藏
+            dialog.title("重命名")
             dialog.transient(self.root)
-            dialog.grab_set()  # 模态对话框
-            dialog.attributes('-topmost', True)  # 让窗口置顶
+            dialog.grab_set()
 
             # 标签和输入框
-            label = tk.Label(dialog, text="请输入新的步骤名称：")
+            label = tk.Label(dialog, text="请输入新的步骤名称")
             label.pack(padx=10, pady=10)
             entry = tk.Entry(dialog)
-            entry.pack(padx=10, pady=10)
+            entry.pack(padx=10, pady=5)
             entry.insert(0, selected_image[1])
 
             # 保存和取消按钮
@@ -3702,7 +3635,25 @@ class ImageRecognitionApp:
                 bootstyle="primary-outline"  
             )
             cancel_button.pack(side=tk.RIGHT, padx=5)
-            dialog.iconbitmap("icon/app.ico")  # 设置窗口图标
+
+            # 让 Tkinter 计算理想大小
+            dialog.update_idletasks()
+            w = dialog.winfo_reqwidth()
+            h = dialog.winfo_reqheight()
+
+            # 计算居中位置
+            main_x = self.root.winfo_x()
+            main_y = self.root.winfo_y()
+            main_w = self.root.winfo_width()
+            main_h = self.root.winfo_height()
+            x = main_x + (main_w - w) // 2
+            y = main_y + (main_h - h) // 2
+
+            # 一次性设置大小和位置，并显示
+            dialog.geometry(f"{w}x{h}+{x}+{y}")
+            dialog.deiconify()
+
+            dialog.iconbitmap("icon/app.ico")
    
     def set_condition_jump(self):
         selected_items = self.tree.selection()
@@ -3714,29 +3665,12 @@ class ImageRecognitionApp:
         selected_index = self.tree.index(selected_item)
         selected_image = list(self.image_list[selected_index])
 
-        # 创建对话框（先不显示内容）
+        # 创建对话框
         dialog = tk.Toplevel(self.root)
+        dialog.withdraw()                     # 先隐藏
         dialog.title("条件跳转")
-        
-        # 预设对话框大小
-        dialog_width = 270
-        dialog_height = 190
-        
-        # 计算居中位置
-        main_x = self.root.winfo_x()
-        main_y = self.root.winfo_y()
-        main_width = self.root.winfo_width()
-        main_height = self.root.winfo_height()
-        center_x = main_x + (main_width - dialog_width) // 2
-        center_y = main_y + (main_height - dialog_height) // 2
-        
-        # 设置初始几何位置
-        dialog.geometry(f"{dialog_width}x{dialog_height}+{center_x}+{center_y}")
-        
-        # 设置窗口关系
         dialog.transient(self.root)
         dialog.grab_set()
-        dialog.attributes('-topmost', True)
 
         # 条件选择
         condition_frame = tk.Frame(dialog)
@@ -3848,13 +3782,37 @@ class ImageRecognitionApp:
         )
         cancel_button.pack(side=tk.RIGHT, padx=5)
 
-        # 最终调整窗口大小（如果需要）
+        # 让 Tkinter 计算“理想”大小
         dialog.update_idletasks()
-        dialog_width = dialog.winfo_width()
-        dialog_height = dialog.winfo_height()
-        center_x = main_x + (main_width - dialog_width) // 2
-        center_y = main_y + (main_height - dialog_height) // 2
-        dialog.geometry(f"+{center_x}+{center_y}")
+        req_w = dialog.winfo_reqwidth()
+        req_h = dialog.winfo_reqheight()
+
+        # 目标比例 4:3
+        ratio_w, ratio_h = 4, 3
+
+        # 方案 A：以理想宽度 req_w 为基准，计算对应的高度
+        h_based_on_w = int(req_w * ratio_h / ratio_w)
+        # 方案 B：以理想高度 req_h 为基准，计算对应的宽度
+        w_based_on_h = int(req_h * ratio_w / ratio_h)
+
+        # 选择能包下所有控件的最小方案
+        # 如果 h_based_on_w >= req_h，就用 (req_w, h_based_on_w)，否则用 (w_based_on_h, req_h)
+        if h_based_on_w >= req_h:
+            new_w, new_h = req_w, h_based_on_w
+        else:
+            new_w, new_h = w_based_on_h, req_h
+
+        # 计算居中位置
+        main_x = self.root.winfo_x()
+        main_y = self.root.winfo_y()
+        main_w = self.root.winfo_width()
+        main_h = self.root.winfo_height()
+        x = main_x + (main_w - new_w) // 2
+        y = main_y + (main_h - new_h) // 2
+
+        # 一次性设置大小（强制 4:3）和位置，并显示
+        dialog.geometry(f"{new_w}x{new_h}+{x}+{y}")
+        dialog.deiconify()
         dialog.iconbitmap("icon/app.ico")  # 设置窗口图标
 
    
@@ -3929,26 +3887,12 @@ class ImageRecognitionApp:
             logging.error(f"跟随步骤出错: {e}")
 
     def show_logs(self):
-        """显示日志窗口（居中于主窗口）"""
+        """显示日志窗口（居中于主窗口）"""    
         log_window = tk.Toplevel(self.root)
+        log_window.withdraw()                     # 先隐藏
         log_window.title("应用日志")
-        
-        # 设置窗口大小
-        log_width = 700
-        log_height = 500
-        
-        # 获取主窗口位置和尺寸
-        main_x = self.root.winfo_x()
-        main_y = self.root.winfo_y()
-        main_width = self.root.winfo_width()
-        main_height = self.root.winfo_height()
-        
-        # 计算居中位置
-        center_x = main_x + (main_width - log_width) // 2
-        center_y = main_y + (main_height - log_height) // 2
-        
-        # 设置日志窗口位置和大小
-        log_window.geometry(f"{log_width}x{log_height}+{center_x}+{center_y}")
+        log_window.transient(self.root)
+        log_window.grab_set()
       
         # 创建文本框和滚动条
         text_frame = tk.Frame(log_window)
@@ -3984,10 +3928,39 @@ class ImageRecognitionApp:
         # 禁用文本框编辑
         log_text.config(state=tk.DISABLED)
 
-        # 确保日志窗口保持在主窗口上方
-        log_window.transient(self.root)
-        log_window.grab_set()
-        log_window.iconbitmap("icon/app.ico")  # 设置窗口图标
+        # 让 Tkinter 计算“理想”大小
+        log_window.update_idletasks()
+        req_w = log_window.winfo_reqwidth()
+        req_h = log_window.winfo_reqheight()
+
+        # 目标比例 4:3
+        ratio_w, ratio_h = 4, 3
+
+        # 方案 A：以理想宽度 req_w 为基准，计算对应的高度
+        h_based_on_w = int(req_w * ratio_h / ratio_w)
+        # 方案 B：以理想高度 req_h 为基准，计算对应的宽度
+        w_based_on_h = int(req_h * ratio_w / ratio_h)
+
+        # 选择能包下所有控件的最小方案
+        # 如果 h_based_on_w >= req_h，就用 (req_w, h_based_on_w)，否则用 (w_based_on_h, req_h)
+        if h_based_on_w >= req_h:
+            new_w, new_h = req_w, h_based_on_w
+        else:
+            new_w, new_h = w_based_on_h, req_h
+
+        # 计算居中位置
+        main_x = self.root.winfo_x()
+        main_y = self.root.winfo_y()
+        main_w = self.root.winfo_width()
+        main_h = self.root.winfo_height()
+        x = main_x + (main_w - new_w) // 2
+        y = main_y + (main_h - new_h) // 2
+
+        # 一次性设置大小（强制 4:3）和位置，并显示
+        log_window.geometry(f"{new_w}x{new_h}+{x}+{y}")
+        log_window.deiconify()
+
+        log_window.iconbitmap("icon/app.ico")
 
 
 if __name__ == "__main__":
