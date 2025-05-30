@@ -95,6 +95,10 @@ class ImageRecognitionApp:
         self.from_step = False
         self.need_retake_screenshot = False
         self.import_and_load = False
+        self.config_loaded = False
+        self.is_cut_mode = False # 用来标记当前操作是剪切而非普通复制
+        self.cut_original_indices = []  # 存放被剪切条目的原始索引
+        self.copied_items = []
         self.screen_scale = 1
         self.follow_current_step = tk.BooleanVar(value=False)  # 控制是否跟随当前步骤
         self.only_keyboard_var = tk.BooleanVar(value=False)  # 控制是否只进行键盘操作
@@ -382,7 +386,7 @@ class ImageRecognitionApp:
             font=('Arial', 10, 'bold'),
             foreground="#495057"
         )
-        self.label_title.pack(side="left", padx=(5, 2))
+        self.label_title.pack(side="left")
 
         # 文件名
         self.label_filename = tk.Label(
@@ -588,13 +592,21 @@ class ImageRecognitionApp:
             self.dragged_item = item
 
     def on_treeview_drag_motion(self, event):
-        """鼠标拖动时高亮目标位置"""
+        """拖动过程中高亮鼠标下方的项目"""
         if not hasattr(self, "dragged_item"):
             return
-
+        
+        # 清除之前的高亮
+        for item in self.tree.get_children():
+            self.tree.item(item, tags=())
+        
+        # 获取当前鼠标位置下的项目
         target_item = self.tree.identify_row(event.y)
+        
         if target_item and target_item != self.dragged_item:
-            self.tree.selection_set(target_item)  # 选中目标行
+            # 高亮目标项目
+            self.tree.tag_configure("drop_target", background="#d9e6ff")
+            self.tree.item(target_item, tags=("drop_target",))
 
     def on_treeview_drag_release(self, event):
         """释放鼠标时将拖动项插入到目标项位置，并更新图片和预览"""
@@ -686,7 +698,7 @@ class ImageRecognitionApp:
         if getattr(self, 'config_filename', None):
             # 只取路径最后的文件名
             fname = os.path.basename(self.config_filename)
-            self.label_filename.config(text=f"（{fname}）")
+            self.label_filename.config(text=f"- {fname}")
         else:
             # 不显示
             self.label_filename.config(text="")
@@ -1139,7 +1151,6 @@ class ImageRecognitionApp:
                 except Exception as ex:
                     logging.error(f"处理列表项时出错: {ex}")
 
-
             # 恢复选择状态（基于索引）
             children = self.tree.get_children()
             new_selection = []
@@ -1184,45 +1195,61 @@ class ImageRecognitionApp:
             # 保存到配置文件
             with open(self.config_filename, 'w', encoding='utf-8') as f:
                 json.dump(config, f, ensure_ascii=False, indent=4)
-            print("已更新配置文件:", self.config_filename)
-            logging.info("已更新配置文件: %s", self.config_filename)
-
+            
+            if self.config_loaded:
+                self.config_loaded = False
+            else:
+                print("已更新配置文件:", self.config_filename)
+                logging.info("已更新配置文件: %s", self.config_filename)
+   
     def delete_selected_image(self):
         try:
-            selected_item = self.tree.selection()
-            if not selected_item:
+            selected_items = self.tree.selection()
+            if not selected_items:
                 messagebox.showinfo("提示", "请先选择要删除的项目")
                 return
-   
-            selected_index = self.tree.index(selected_item[0])
-            if 0 <= selected_index < len(self.image_list):
-                selected_image = self.image_list[selected_index]
-                img_path = selected_image[0]
-                   
-                if messagebox.askyesno("确认删除", "是否删除该步骤和对应的图片文件？"):
-                    del self.image_list[selected_index]
-                    # 检查是否有其他项目引用相同的图像文件
-                    is_referenced = any(item[0] == img_path for item in self.image_list)
-                    if not is_referenced and os.path.exists(img_path):
-                        try:
-                            os.remove(img_path)
-                            print(f"图像文件已删除: {img_path}")
-                            logging.info(f"图像文件已删除: {img_path}")
-                        except Exception as e:
-                            print(f"删除图像文件时出错: {e}")
-                            logging.error(f"删除图像文件时出错: {e}")
-                   
-                self.update_image_listbox()
-                self.load_default_image()
-                self.clear_labels()
 
-            else:
-                print("选中的索引超出范围")
-                logging.warning("选中的索引超出范围")
+            count = len(selected_items)
+            if not messagebox.askyesno("确认删除", f"是否删除这 {count} 个步骤及对应的图片文件？"):
+                return
+
+            # 计算索引并倒序删除
+            indices = [self.tree.index(item) for item in selected_items]
+            indices.sort(reverse=True)
+
+            paths_to_check = []
+            for idx in indices:
+                if 0 <= idx < len(self.image_list):
+                    paths_to_check.append(self.image_list[idx][0])
+                    del self.image_list[idx]
+                else:
+                    logging.warning(f"选中的索引超出范围: {idx}")
+
+            # 删除硬盘文件
+            for img_path in set(paths_to_check):
+                if not any(item[0] == img_path for item in self.image_list) and os.path.exists(img_path):
+                    try:
+                        os.remove(img_path)
+                        logging.info(f"图像文件已删除: {img_path}")
+                    except Exception as e:
+                        logging.error(f"删除图像文件时出错: {e}")
+
+            # 刷新界面
+            self.update_image_listbox()
+            self.load_default_image()
+            self.clear_labels()
+
+            #清空复制缓存
+            self.copied_items.clear()
+            self.cut_original_indices.clear()
+
+            # —— 强制清除所有选中和焦点 —— 
+            self.tree.selection_remove(self.tree.selection())
+
         except Exception as e:
-            print(f"删除图像时出错: {e}")
             logging.error(f"删除图像时出错: {e}")
-   
+
+
     def toggle_script(self, event=None):
         if self.toggle_run_button.cget("text") == "停止运行(F9)":
             self.stop_script()
@@ -2205,7 +2232,7 @@ class ImageRecognitionApp:
                     new_info += f":{current_count}"
                 return new_info
 
-            targets = selected_indices or [self.tree.index(self.tree.selection()[0])] if self.tree.selection() else []
+            targets = selected_indices or ([self.tree.index(item) for item in self.tree.selection()] if self.tree.selection() else [])
             if not targets:
                 return
 
@@ -2220,6 +2247,11 @@ class ImageRecognitionApp:
                     return
                 if new_info:
                     self.image_list[i] = (*image[:4], new_info, *image[5:])
+                    old_coodr = image[4].split(":")[1] if image[4] and ":" in image[4] else image[4]
+                    new_coodr = new_info.split(":")[1] if new_info and ":" in new_info else new_info
+                    step_name = image[1]
+                    logging.info(f"【{step_name}】坐标更新：({old_coodr}) → ({new_coodr})")      
+                    print(f"【{step_name}】坐标更新：({old_coodr}) → ({new_coodr})")
 
             self.update_image_listbox()
             dialog.destroy()
@@ -2681,6 +2713,7 @@ class ImageRecognitionApp:
             # 更新循环次数输入框
             self.loop_count_entry.delete(0, tk.END)
             self.loop_count_entry.insert(0, str(self.loop_count))
+            self.config_loaded = True
             
             # 取消之前的全局热键， 注册新的全局热键
             self.unregister_global_hotkey()
@@ -3035,7 +3068,6 @@ class ImageRecognitionApp:
     def get_mouse_position(self, event=None):
         # 获取当前鼠标位置
         x, y = pyautogui.position()
-        messagebox.showinfo("鼠标位置", f"当前鼠标位置: ({x}, {y})")
     
         # 将鼠标位置存储到当前选中的图像中
         selected_item = self.tree.selection()
@@ -3062,7 +3094,15 @@ class ImageRecognitionApp:
                 selected_image[3], mouse_action, selected_image[5], 
                 selected_image[6], selected_image[7], selected_image[8], selected_image[9], selected_image[10]
             )
+
+            step_name = selected_image[1]
+            old_coodr = selected_image[4].split(":")[1] if selected_image[4] and ":" in selected_image[4] else selected_image[4]
+            new_coodr = x, y
+            logging.info(f"【{step_name}】坐标更新：({old_coodr}) → {new_coodr}")      
+            print(f"【{step_name}】坐标更新：({old_coodr}) → {new_coodr}")
+            
             self.update_image_listbox()
+            messagebox.showinfo("更新坐标", f"坐标已更新为({x}, {y})")
    
     def cleanup_on_exit(self):
         try:
@@ -3132,6 +3172,8 @@ class ImageRecognitionApp:
         self.empty_space_menu = tk.Menu(self.root, tearoff=0)
         self.empty_space_menu.add_command(label="清空列表", command=self.clear_list)
         self.empty_space_menu.add_separator()
+        self.empty_space_menu.add_command(label="粘贴", command=self.paste_item)
+        self.empty_space_menu.add_separator()
         self.empty_space_menu.add_command(label="保存配置", command=self.save_config)
         self.empty_space_menu.add_command(label="加载配置", command=self.load_config)
         self.empty_space_menu.add_separator()
@@ -3143,12 +3185,12 @@ class ImageRecognitionApp:
         self.context_menu.add_command(label="关闭识图", command=self.Image_recognition_click)  # 默认显示为“关闭识图”，索引1
         self.context_menu.add_command(label="条件跳转", command=self.set_condition_jump)
         self.context_menu.add_separator() #索引3
-
         self.context_menu.add_command(label="复制", command=self.copy_item)
+        self.context_menu.add_command(label="剪切", command=self.cut_item)
         self.context_menu.add_command(label="粘贴", command=self.paste_item)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="删除", command=self.delete_selected_image)
-        self.context_menu.add_command(label="禁用", command=self.toggle_disable_status)  # 注意保持为“禁用”，索引8
+        self.context_menu.add_command(label="禁用", command=self.toggle_disable_status)  # 注意保持为“禁用”，索引9
         self.context_menu.add_separator()
         self.context_menu.add_command(label="从此步骤运行", command=self.start_from_step)
         self.context_menu.add_command(label="打开图片位置", command=self.open_image_location)
@@ -3163,6 +3205,20 @@ class ImageRecognitionApp:
         self.context_menu.add_command(label="清空列表", command=self.clear_list)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="查看日志", command=self.show_logs)
+
+        # 多选菜单
+        self.multi_select_menu = tk.Menu(self.root, tearoff=0)
+        self.multi_select_menu.add_command(label="复制", command=self.copy_item)
+        self.multi_select_menu.add_command(label="剪切", command=self.cut_item)
+        self.multi_select_menu.add_separator()
+        self.multi_select_menu.add_command(label="删除", command=self.delete_selected_image)
+        self.multi_select_menu.add_separator()
+        self.multi_select_menu.add_command(label="偏移坐标", command=self.offset_coords)
+        self.multi_select_menu.add_separator()
+        self.multi_select_menu.add_command(label="清空列表", command=self.clear_list)
+        self.multi_select_menu.add_separator()
+        self.multi_select_menu.add_command(label="查看日志", command=self.show_logs)
+
 
     def update_context_menu(self):
         selected = self.tree.selection()
@@ -3183,7 +3239,7 @@ class ImageRecognitionApp:
             # 更新禁用/启用菜单项（基于“状态”列）
             disabled = self.item_is_disabled(selected_item)
             new_disable_label = "启用" if disabled else "禁用"
-            self.context_menu.entryconfig(8, label=new_disable_label, command=self.toggle_disable_status)
+            self.context_menu.entryconfig(9, label=new_disable_label, command=self.toggle_disable_status)
             self.update_label() # 更新详细信息
     
     def toggle_disable_status(self):
@@ -3230,6 +3286,8 @@ class ImageRecognitionApp:
             ))
             self.update_context_menu()
             self.update_image_listbox()
+            # —— 强制清除所有选中和焦点 —— 
+            self.tree.selection_remove(self.tree.selection())
 
     def item_is_disabled(self, item):
         values = self.tree.item(item, "values")
@@ -3285,72 +3343,197 @@ class ImageRecognitionApp:
 
     def show_context_menu(self, event):
         item = self.tree.identify_row(event.y)
-        
+
         if item:  # 点击的是项目
-            self.tree.selection_clear()
-            self.tree.selection_set(item)
-            self.tree.focus(item)
-            self.update_context_menu()  # 更新菜单状态
-            # 使用after确保菜单在选中后显示
-            self.root.after(1, lambda: self.context_menu.post(event.x_root, event.y_root))
+            # 获取当前所有选中的项
+            selected_items = self.tree.selection()
+
+            # 判断是否是多选状态
+            if item not in selected_items or len(selected_items) <= 1:
+                # 如果点击的不是当前选中的项，或选中的项数 <= 1，则重设选中项
+                self.tree.selection_clear()
+                self.tree.selection_set(item)
+                self.tree.focus(item)
+                selected_items = (item,)
+
+            # 根据选中项数显示不同菜单
+            if len(selected_items) > 1:
+                self.root.after(1, lambda: self.multi_select_menu.post(event.x_root, event.y_root))
+            else:
+                self.update_context_menu()
+                self.root.after(1, lambda: self.context_menu.post(event.x_root, event.y_root))
         else:  # 点击的是空白处
+            # —— 强制清除所有选中和焦点 —— 
+            self.tree.selection_remove(self.tree.selection())
             self.empty_space_menu.post(event.x_root, event.y_root)
-        
+
         return "break"
    
     def clear_list(self):
         self.reset_to_initial_state()
 
     def copy_item(self):
-        selected_items = self.tree.selection()
-        if selected_items:
-            index = self.tree.index(selected_items[0])
-            original_item = self.image_list[index]
-               
-            # 创建像文件的副本
-            new_image_path = self.create_image_copy(original_item[0])
-               
-            # 创建新的元组，使用新的图像路径
-            self.copied_item = (new_image_path,) + tuple(original_item[1:])
-   
+        if self.is_cut_mode:
+            self.restore_cut()
+            messagebox.showinfo("提示","已恢复剪切后未粘贴的步骤，请重新复制")
+            return
+        selected = self.tree.selection()
+        if not selected:
+            return
+        # 普通复制，不触发剪切模式
+        self.is_cut_mode = False
+        self.cut_original_indices = []
+        self.copied_items = []
+        for sel in selected:
+            idx = self.tree.index(sel)
+            original = self.image_list[idx]
+            new_path = self.create_image_copy(original[0])
+            record = [new_path] + list(original[1:])
+            self.copied_items.append(record)
+
+        print(f"已复制 {len(self.copied_items)} 个项目")
+        self.tree.selection_clear()
+        # —— 强制清除所有选中和焦点 —— 
+        self.tree.selection_remove(self.tree.selection())
+
     def create_image_copy(self, original_path):
-        # 创建图像文件的副本（与原文件同目录）
+        """
+        在原文件同目录下复制一份图像文件。
+        如果已经存在 name_copy.ext，则依次尝试 name_copy2.ext、name_copy3.ext ... 直到不冲突。
+        返回新文件的完整路径。
+        """
         dirname = os.path.dirname(original_path)
         base_name = os.path.basename(original_path)
         name, ext = os.path.splitext(base_name)
-        new_name = f"{name}_copy{ext}"
+
+        # 如果原始文件名已经包含 _copy + 数字，则提取原始名称
+        import re
+        match = re.match(r"^(.*?)(_copy\d*)?$", name)
+        if match:
+            name = match.group(1)  # 只保留原始名称部分
+
+        # 尝试基本的 _copy 后缀
+        suffix = "_copy"
+        new_name = f"{name}{suffix}{ext}"
         new_path = os.path.join(dirname, new_name)
+
+        # 如果已存在，就循环尝试带数字的后缀
+        count = 2
+        while os.path.exists(new_path):
+            new_name = f"{name}{suffix}{count}{ext}"
+            new_path = os.path.join(dirname, new_name)
+            count += 1
+
         shutil.copy2(original_path, new_path)
         return new_path
        
+    def cut_item(self):
+        selected = self.tree.selection()
+        if not selected:
+            messagebox.showinfo("提示", "请先选择要剪切的项目")
+            return
+
+        self.is_cut_mode = True
+
+        # 收集索引并降序删除
+        indices = sorted((self.tree.index(iid) for iid in selected), reverse=True)
+        for idx in indices:
+            self.cut_original_indices.append(idx)
+            self.copied_items.append(self.image_list.pop(idx))
+
+        # 刷新界面
+        self.update_image_listbox()
+        self.clear_labels()
+        # —— 强制清除所有选中和焦点 —— 
+        self.tree.selection_remove(self.tree.selection())
+
+        print(f"已剪切 {len(self.copied_items)} 个项目")
+
     def paste_item(self):
-        if self.copied_item:
-            target = self.tree.focus()  # 获取当前选中的项目
-            if target:
-                target_index = self.tree.index(target)  # 获取当前项目的索引
-                new_item = list(self.copied_item)  # 复制项目数据（确保是可变列表）
-                self.image_list.insert(target_index + 1, new_item)  # 插入到选中项的下一行
+        if not self.copied_items:
+            messagebox.showinfo("提示", "没有要粘贴的项目")
+            return
+
+        # 计算插入位置
+        focus = self.tree.focus()
+        insert_pos = self.tree.index(focus) + 1 if focus else len(self.image_list)
+
+        # 处理粘贴的文件名（避免重复）
+        new_records = []
+        for record in self.copied_items:
+            original_path = record[0]
+            dirname = os.path.dirname(original_path)
+            base_name = os.path.basename(original_path)
+            name, ext = os.path.splitext(base_name)
+
+            # 如果文件名已经包含 _数字 后缀，则提取原始名称
+            import re
+            match = re.match(r"^(.*?)(_\d+)?$", name)
+            if match:
+                name = match.group(1)  # 只保留原始名称部分
+
+            # 检查目标路径是否已存在
+            new_name = f"{name}{ext}"
+            new_path = os.path.join(dirname, new_name)
+
+            # 如果已存在，则添加 _1, _2, ... 后缀
+            count = 1
+            while os.path.exists(new_path):
+                new_name = f"{name}_{count}{ext}"
+                new_path = os.path.join(dirname, new_name)
+                count += 1
+
+            # 复制文件（如果是剪切模式则移动文件）
+            if self.is_cut_mode:
+                os.rename(original_path, new_path)
             else:
-                new_item = list(self.copied_item)
-                self.image_list.append(new_item)  # 如果没有选中项，则添加到末尾
-                
-            self.update_image_listbox()  # 更新详细信息
-     
-            # 获取所有项
-            all_items = self.tree.get_children()
-            if all_items:
-                if target:
-                    last_item = all_items[target_index + 1]  # 获取新插入的项目
-                else:
-                    last_item = all_items[-1]  # 如果没有选中项，则聚焦到最后一个项目
-                
-                self.tree.selection_set(last_item)  # 选择该项目
-                self.tree.focus(last_item)  # 聚焦到该项目
-                self.tree.see(last_item)  # 滚动到可见区域
-                print(f"聚焦到项目: {last_item}")
-            else:
-                print("没有可用的项目")
-            self.update_label() # 更新详细信息
+                shutil.copy2(original_path, new_path)
+
+            # 更新记录
+            new_record = [new_path] + list(record[1:])
+            new_records.append(new_record)
+
+        # 插入到 data list
+        for i, record in enumerate(new_records):
+            self.image_list.insert(insert_pos + i, record)
+
+        # 刷新界面并聚焦新行
+        self.update_image_listbox()
+        new_iids = self.tree.get_children()[insert_pos: insert_pos + len(new_records)]
+        if new_iids:
+            self.tree.selection_set(new_iids)
+            self.tree.focus(new_iids[0])
+            self.tree.see(new_iids[-1])
+
+        if self.is_cut_mode:
+            self.cut_original_indices.clear()
+            self.copied_items.clear()
+
+        # 退出剪切模式
+        self.is_cut_mode = False
+
+        print("粘贴完成")
+
+    def restore_cut(self):
+        """
+        如果剪切后未粘贴就切换模式或关闭
+        把被剪切的项目按原始位置恢复到列表和界面。
+        """
+        if not self.is_cut_mode or not self.copied_items:
+            return
+
+        # 按升序把项目放回去
+        for idx, record in sorted(zip(self.cut_original_indices, self.copied_items)):
+            self.image_list.insert(idx, record)
+
+        # 刷新列表
+        self.update_image_listbox()
+
+        self.is_cut_mode = False
+        self.cut_original_indices.clear()
+        self.copied_items.clear()
+
+        print("剪切操作已恢复，原始项目已还原")
 
     def edit_similarity_threshold(self):
         selected_items = self.tree.selection()
@@ -3968,6 +4151,8 @@ if __name__ == "__main__":
     app = ImageRecognitionApp(root)
     
     def on_closing():
+        if app.is_cut_mode:
+            app.restore_cut()
         if app.config_filename is None and app.image_list:
             response = tk.messagebox.askyesno(
                 "提示",
