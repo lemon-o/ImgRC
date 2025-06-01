@@ -26,6 +26,7 @@ import ttkbootstrap as tb
 from ttkbootstrap.constants import *
 import ttkbootstrap as ttk
 from ttkbootstrap.tooltip import ToolTip
+import tkinter.font as tkfont
 
 def run_as_admin():
     if ctypes.windll.shell32.IsUserAnAdmin():
@@ -55,20 +56,6 @@ class ImageRecognitionApp:
     def __init__(self, root):
         self.root = root
         self.root.title("ImgRC")
-        # 设置窗口居中显示
-        self.center_window()
-        # 设置窗口图标（相对路径）
-        root.iconbitmap("icon/app.ico")   
-        # 获取屏幕高度
-        screen_height = root.winfo_screenheight()    
-        # 根据屏幕高度设置窗口尺寸
-        if 1080 <= screen_height < 1440:  # 普通高清屏(1080p)
-            self.root.geometry("620x600")
-        elif 1440 <= screen_height < 2160:  # 2K屏
-            self.root.geometry("650x635")
-        else:  # 其他分辨率使用默认尺寸
-            self.root.geometry("620x600")  
-        self.root.resizable(False, False)  # 禁止调整窗口大小
         self.style = tb.Style(theme='flatly')  # 选择一个主题
         self.image_list = []  # 存储 (图像路径, 步骤名称, 相似度, 键盘动作, 坐标(F2), 延时ms, 条件, 需跳转，状态， 需禁用， 鼠标动作)
         self.screenshot_area = None  # 用于存储截图区域
@@ -102,7 +89,15 @@ class ImageRecognitionApp:
         self.screen_scale = 1
         self.follow_current_step = tk.BooleanVar(value=False)  # 控制是否跟随当前步骤
         self.only_keyboard_var = tk.BooleanVar(value=False)  # 控制是否只进行键盘操作
+        # 先隐藏窗口
+        root.withdraw()
         self.init_ui()
+        # 自动调整窗口大小并居中
+        self.adjust_window()
+        # 设置窗口图标（相对路径）
+        root.iconbitmap("icon/app.ico") 
+        self.root.resizable(False, False)  # 禁止调整窗口大小
+        root.deiconify()  # 显示窗口  
         self.tree.image_refs = []  # 初始化 image_refs 属性
         self.init_logging()
         self.bind_arrow_keys()
@@ -123,7 +118,7 @@ class ImageRecognitionApp:
 
         # 区域A：按钮区域
         self.region_a = tb.Frame(self.region_l)
-        self.region_a.pack(fill=tk.X, padx=2, pady=5)
+        self.region_a.pack(fill=tk.X, padx=2, pady=0)
 
         # 图标缓存
         self.icons = {
@@ -276,7 +271,7 @@ class ImageRecognitionApp:
 
         # 使用 Treeview 来显示图片和延时ms
         self.tree = ttk.Treeview(self.region_b, columns=(
-            "图片名称", "步骤名称", "相似度", "键盘动作", "坐标(F2)", "延时ms", "条件", "需跳转", "状态", "需禁用", "鼠标动作"
+            "图片名称", "步骤名称", "相似度", "键盘动作", "坐标(F2)", "延时ms", "条件", "需跳转", "状态", "需禁用", "鼠标动作", "条件2", "需跳转2", "需禁用2"
         ), show='headings')
         self.tree.heading("图片名称", text="图片名称")
         self.tree.heading("步骤名称", text="步骤名称")
@@ -289,6 +284,9 @@ class ImageRecognitionApp:
         self.tree.heading("状态", text="状态")
         self.tree.heading("需禁用", text="需禁用")
         self.tree.heading("鼠标动作", text="鼠标动作")
+        self.tree.heading("条件2", text="条件2")
+        self.tree.heading("需跳转2", text="需跳转2")
+        self.tree.heading("需禁用2", text="需禁用2")
 
         # 设置列宽和对齐方式（居中）
         self.tree.column("图片名称", width=75, anchor='center')
@@ -302,6 +300,10 @@ class ImageRecognitionApp:
         self.tree.column("状态", width=75, anchor='center')
         self.tree.column("需禁用", width=75, anchor='center')
         self.tree.column("鼠标动作", width=75, anchor='center')
+        self.tree.column("条件2", width=75, anchor='center')
+        self.tree.column("需跳转2", width=75, anchor='center')
+        self.tree.column("需禁用2", width=75, anchor='center')
+
         #显示的列
         self.tree.configure(displaycolumns=["步骤名称", "延时ms"])
         #禁用状态的颜色
@@ -319,7 +321,7 @@ class ImageRecognitionApp:
 
         # 创建外部边框区域（使用指定灰色）
         self.region_r_border = tb.Frame(self.main_frame)
-        self.region_r_border.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=7, pady=15)
+        self.region_r_border.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=7, pady=10)
 
         # 内部区域R设置白色背景
         self.region_r = tb.Frame(
@@ -341,20 +343,24 @@ class ImageRecognitionApp:
         self.region_c = tb.Frame(self.region_r, style="PreviewBg.TFrame")
         self.region_c.pack(fill=tk.BOTH, padx=10, pady=(10, 0), expand=False)  # 关键修改
 
-        # 预览面板（精确高度控制）
+        # 设置目标宽度
+        target_width = 357  # 可根据窗口动态计算或自定义设置
+        target_height = int(target_width * 37 / 50)  # 宽高比
+
+        # 预览面板
         self.preview_panel = tb.Frame(
             self.region_c,
-            width=357,
-            height=236
+            width=target_width,
+            height=target_height
         )
         self.preview_panel.pack_propagate(False)
-        self.preview_panel.pack()  
+        self.preview_panel.pack()
 
-        # 图像容器（精确高度控制）
+        # 图像容器
         self.preview_container = tb.Frame(
             self.preview_panel,
-            width=340,
-            height=240,
+            width=target_width - 5, 
+            height=target_height - 5,
             style="ImageContainer.TFrame"
         )
         self.preview_container.pack_propagate(False)
@@ -371,20 +377,25 @@ class ImageRecognitionApp:
 
         # 区域D：紧贴区域C（取消顶部边距）
         self.region_d = tb.Frame(self.region_r, style="InnerR.TFrame")
-        self.region_d.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))  # 关键修改
+        self.region_d.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))  
 
         # 详细信息标签区域
         # —— 第一行：标题 + 文件名 —— #
         self.label_frame = tk.Frame(self.region_d)
-        self.label_frame.pack(fill="x", pady=(10, 0))
+        self.label_frame.pack(fill="x", pady=(20, 3))
 
         # 标题“详细信息”
+        # 获取默认字体，并克隆一个出来
+        default_font = tkfont.nametofont("TkDefaultFont").copy()
+        default_font.configure(weight="bold")  # 设置为加粗
+
+        # 应用到 label 上
         self.label_title = tk.Label(
             self.label_frame,
             text="详细信息",
             anchor="w",
-            font=('Arial', 10, 'bold'),
-            foreground="#495057"
+            foreground="#495057",
+            font=default_font
         )
         self.label_title.pack(side="left")
 
@@ -393,14 +404,13 @@ class ImageRecognitionApp:
             self.label_frame,
             text="",          # 会在 update 时填充
             anchor="w",
-            font=('Arial', 10),
             foreground="#9D9FA1"
         )
         self.label_filename.pack(side="left")
 
         # —— 第二行：各字段标签 —— #
         self.labels_frame = tk.Frame(self.region_d)
-        self.labels_frame.pack(fill="x", pady=(10, 5))
+        self.labels_frame.pack(fill="x", pady=(2, 0))
 
         # 初始化字段标签
         self.labels = {
@@ -410,13 +420,10 @@ class ImageRecognitionApp:
             "键盘动作": tk.Label(self.labels_frame, text="键盘动作: ", anchor="w"),
             "鼠标动作": tk.Label(self.labels_frame, text="鼠标动作: ", anchor="w"),
             "状态":     tk.Label(self.labels_frame, text="状态: ",     anchor="w"),
-            "条件":     tk.Label(self.labels_frame, text="条件: ",     anchor="w"),
-            "需跳转":   tk.Label(self.labels_frame, text="需跳转: ",   anchor="w"),
-            "需禁用":   tk.Label(self.labels_frame, text="需禁用: ",   anchor="w"),
         }
         for lbl in self.labels.values():
             lbl.configure(foreground="#495057")
-            lbl.pack(fill="x", padx=5, pady=2)
+            lbl.pack(fill="x", padx=0, pady=0)
             
         # 绑定焦点事件
         self.tree.bind("<FocusIn>", self.update_label)
@@ -443,24 +450,28 @@ class ImageRecognitionApp:
         self.tree.bind("<B1-Motion>", self.on_treeview_drag_motion)
         self.tree.bind("<ButtonRelease-1>", self.on_treeview_drag_release)
 
-    def center_window(self):
+    def adjust_window(self):
         """
-        将窗口居中显示
+        自动调整窗口大小并居中
+        基于update_idletasks()+winfo_reqwidth()/winfo_reqheight()
         """
-        # 获取屏幕宽度和高度
+        # 更新窗口计算布局
+        self.root.update_idletasks()
+        
+        # 获取窗口内容所需的最小尺寸
+        req_width = self.root.winfo_reqwidth()
+        req_height = self.root.winfo_reqheight()
+        
+        # 获取屏幕尺寸
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
-
-        # 设置窗口的宽度和高度
-        window_width = 657  # 你可以根据需要调整窗口宽度
-        window_height = 543  # 你可以根据需要调整窗口高度
-
-        # 计算窗口居中的位置
-        x = (screen_width - window_width) // 2
-        y = (screen_height - window_height) // 2
-
-        # 设置窗口的位置和大小
-        self.root.geometry(f"{window_width}x{window_height}+{x}+{y}")
+        
+        # 计算居中位置
+        x = (screen_width - req_width) // 2
+        y = (screen_height - req_height) // 2
+        
+        # 设置窗口大小和位置
+        self.root.geometry(f"{req_width}x{req_height}+{x}+{y}")
         
     # 获取屏幕缩放比例
     def get_screen_scale(self):
@@ -705,8 +716,7 @@ class ImageRecognitionApp:
         # 字段配置 (名称: 索引)
         字段配置 = {
             "图片名称": 0, "相似度": 2, "坐标(F2)": 4,
-            "键盘动作": 3, "鼠标动作": 10, "状态": 8,
-            "条件": 6, "需跳转": 7, "需禁用": 9
+            "键盘动作": 3, "鼠标动作": 10, "状态": 8
         }
 
         for 字段名, 索引 in 字段配置.items():
@@ -809,7 +819,6 @@ class ImageRecognitionApp:
         if hasattr(self, 'top') and self.top:  # 确保 self.top 存在
             self.top.destroy()
             self.top = None  # 释放引用，防止重复调用时报错
-        self.root.deiconify()  # 重新显示主窗口
    
     def on_button_press(self, event):
         # 记录起始点坐标
@@ -962,7 +971,10 @@ class ImageRecognitionApp:
                     selected_image[7],       # 7: 需跳转
                     selected_image[8],       # 8: 状态
                     selected_image[9],      # 9: 【需禁用】目标
-                    selected_image[10]      # 10: 鼠标动作
+                    selected_image[10],     # 10: 鼠标动作
+                    selected_image[11],       # 11: 条件2
+                    selected_image[12],      # 12: 需跳转2
+                    selected_image[13]      # 13: 需禁用2
                 )
 
                 # 4. 更新数据源
@@ -1011,9 +1023,9 @@ class ImageRecognitionApp:
             if selected_item:   
                 selected_index = self.tree.index(selected_item[0])  # 获取选中项的索引
                 insert_index = selected_index + 1  # 在选中项的下一行插入新项目
-                self.image_list.insert(insert_index, (screenshot_path, step_name, 0.8, "", mouse_click_coordinates, 100, "", "", "启用", "", "左键单击 1次"))
+                self.image_list.insert(insert_index, (screenshot_path, step_name, 0.8, "", mouse_click_coordinates, 100, "", "", "启用", "", "左键单击 1次", "", "", ""))
             else:
-                self.image_list.append((screenshot_path, step_name, 0.8, "", mouse_click_coordinates, 100, "", "", "启用", "", "左键单击 1次"))
+                self.image_list.append((screenshot_path, step_name, 0.8, "", mouse_click_coordinates, 100, "", "", "启用", "", "左键单击 1次", "", "", ""))
 
         self.update_image_listbox()  # 更新详细信息
 
@@ -1100,7 +1112,7 @@ class ImageRecognitionApp:
                         continue
                     full_item = list(item)
                     # 确保数据完整，若字段不足则补空字符串
-                    while len(full_item) < 11:
+                    while len(full_item) < 14:
                         full_item.append("")
 
                     # 解包所有列（包括新增的“状态”列和“需禁用”列）
@@ -1115,7 +1127,10 @@ class ImageRecognitionApp:
                         jump_to, 
                         status,
                         steps_to_disable,
-                        mouse_action_result
+                        mouse_action_result,
+                        condition_2,
+                        jump_to_2,
+                        steps_to_disable_2,
                     ) = full_item
 
                     # 提取坐标部分
@@ -1139,7 +1154,10 @@ class ImageRecognitionApp:
                             jump_to,
                             status, 
                             steps_to_disable,
-                            mouse_action_result
+                            mouse_action_result,
+                            condition_2,
+                            jump_to_2,
+                            steps_to_disable_2,
                         ), image=photo)
                         self.tree.image_refs.append(photo)  # 保持对图像的引用
 
@@ -1343,8 +1361,10 @@ class ImageRecognitionApp:
                 wait_time = current_step[5]
                 condition = current_step[6] if len(current_step) > 6 else ""
                 jump_to = current_step[7] if len(current_step) > 7 else ""
-                # 注意：disable_target 与跳转无关，单独判断；假设存储在索引 9
                 disable_target = current_step[9] if len(current_step) > 9 else ""
+                condition_2 = current_step[11] if len(current_step) > 11 else ""
+                jump_to_2 = current_step[12] if len(current_step) > 12 else ""
+                disable_target_2 = current_step[13] if len(current_step) > 13 else ""
 
                 # 执行图像匹配或键盘操作
                 if mouse_click_coordinates and not self.only_keyboard_var.get():
@@ -1353,14 +1373,19 @@ class ImageRecognitionApp:
                     match_result = self.match_and_click(img_path, similarity_threshold)
                 else:
                     match_result = True if keyboard_input else False
+                
 
                 # 等待（将毫秒转换为秒）
                 if wait_time > 0:
                     time.sleep(wait_time / 1000.0)
 
-                # -------------------------------
-                # 单独处理【需禁用】目标步骤（与跳转无关）
-                if disable_target:
+                if condition == "识图成功" and match_result:
+
+                    if jump_to in self.step_index_map:
+                        index = self.step_index_map[jump_to] -1
+                        print(f"从【{img_name}】跳转到【{jump_to}】")
+                        logging.info(f"从【{img_name}】跳转到【{jump_to}】")
+
                     if disable_target in self.step_index_map:
                         target_index = self.step_index_map[disable_target]
                         target_image = list(self.image_list[target_index])
@@ -1374,37 +1399,31 @@ class ImageRecognitionApp:
                             values[8] = "禁用"
                             self.tree.item(target_item, values=tuple(values))
                             print(f"{disable_target} 已被禁用")
-                    else:
-                        print(f"需禁用的目标 {disable_target} 不存在")
-                # -------------------------------
-                # 分离处理需跳转
-                if condition and jump_to:
-                    should_jump = False
-                    if condition == "识图成功" and match_result:
-                        should_jump = True
-                        print(f"【{img_name}】执行完毕")
-                        logging.info(f"【{img_name}】执行完毕")
-                        print(f"从【{img_name}】跳转到【{jump_to}】")
-                        logging.info(f"从【{img_name}】跳转到【{jump_to}】")
-                    elif condition == "识图失败" and not match_result:
-                        should_jump = True
-                        print(f"【{img_name}】执行完毕")
-                        logging.info(f"【{img_name}】执行完毕")
-                        print(f"从【{img_name}】跳转到【{jump_to}】")
-                        logging.info(f"从【{img_name}】跳转到【{jump_to}】")
+                else:
+                    # 重新匹配
+                    if not match_result and not condition_2:
+                        match_result = self.retry_until_match(img_path, similarity_threshold, wait_time)
 
-                    if should_jump:
-                        if jump_to in self.step_index_map:
-                            index = self.step_index_map[jump_to]
-                            continue
-                        else:
-                            print(f"跳转目标 {jump_to} 不存在，停止执行")
-                            self.running = False
-                            break
+                if condition_2 == "识图失败" and not match_result:
 
-                # 如果没有跳转且匹配失败，则尝试重试（仅适用于非键盘操作情况）
-                if not match_result and not (condition and jump_to) and not self.only_keyboard_var.get():
-                    match_result = self.retry_until_match(img_path, similarity_threshold, wait_time)
+                    if jump_to_2 in self.step_index_map:
+                        index = self.step_index_map[jump_to_2] -1
+                        print(f"从【{img_name}】跳转到【{jump_to_2}】")
+                        logging.info(f"从【{img_name}】跳转到【{jump_to_2}】")
+
+                    if disable_target_2 in self.step_index_map:
+                        target_index = self.step_index_map[disable_target_2]
+                        target_image = list(self.image_list[target_index])
+                        # 仅在目标项未被禁用时更新
+                        if target_image[8] != "禁用":
+                            target_image[8] = "禁用"
+                            self.image_list[target_index] = tuple(target_image)
+                            # 同步更新 TreeView 显示
+                            target_item = self.tree.get_children()[target_index]
+                            values = list(self.tree.item(target_item, 'values'))
+                            values[8] = "禁用"
+                            self.tree.item(target_item, values=tuple(values))
+                            print(f"{disable_target_2} 已被禁用")
 
                 index += 1
                 print(f"【{self.current_step_name}】执行完毕")
@@ -1426,12 +1445,14 @@ class ImageRecognitionApp:
         遍历 image_list，恢复所有因其他步骤设置【需禁用】而被禁用的目标步骤状态为“启用”，
         并同步更新 TreeView 显示。
         """
-        # 收集所有被引用为 disable_target 的步骤名称
+        # 收集所有被引用为 disable_target 的步骤名称（索引 9 和 13）
         disable_targets = set()
         for step in self.image_list:
             if len(step) > 9 and step[9]:
                 disable_targets.add(step[9])
-        
+            if len(step) > 13 and step[13]:
+                disable_targets.add(step[13])
+
         # 遍历 image_list，检查那些步骤的名称是否在 disable_targets 内，且当前状态为 "禁用"
         for idx, step in enumerate(self.image_list):
             step_name = step[1]
@@ -1444,7 +1465,6 @@ class ImageRecognitionApp:
                 self.tree.item(tree_item, values=tuple(values))
                 self.tree.item(tree_item, tags=())
                 print(f"已恢复 {step_name} 的状态为启用")
-
 
     def retry_until_match(self, img_path, similarity_threshold, wait_time):
         """
@@ -1479,6 +1499,7 @@ class ImageRecognitionApp:
         
         self.thread = None
         self.root.after(0, self.update_ui_after_stop)
+        self.restore_disabled_steps()
 
         result = self.loop_count - self.current_loop  # 计算结果
         display_value = max(0, result)  # 如果结果为负数，则设为 0
@@ -1563,43 +1584,48 @@ class ImageRecognitionApp:
                     if ":" in mouse_coordinates:
                         parts = mouse_coordinates.split(":")
                         action = parts[0]
-                        coords = parts[1]
-                        is_dynamic = parts[2]
-                        # 对于需要计数的操作（点击、滚轮），解析最后的数字，默认 1
-                        count_val = int(parts[3]) if len(parts) > 3 else 1  
-
-                        # 计算点击或滚动的参考位置
-                        if is_dynamic == "1":
-                            x = max_loc[0] + template.shape[1] // 2
-                            y = max_loc[1] + template.shape[0] // 2
+                        
+                        # 如果是无操作，直接跳过不执行任何鼠标动作
+                        if action == "none":
+                            pass  # 不执行任何操作
                         else:
-                            x, y = map(int, coords.split(","))
+                            coords = parts[1]
+                            is_dynamic = parts[2]
+                            # 对于需要计数的操作（点击、滚轮），解析最后的数字，默认 1
+                            count_val = int(parts[3]) if len(parts) > 3 else 1  
 
-                        # 执行相应的鼠标操作
-                        if action == "click":
-                            for _ in range(count_val):
-                                pyautogui.click(x, y)
-                        elif action == "rightClick":
-                            pyautogui.moveTo(x, y)
-                            pyautogui.rightClick()
-                        elif action == "doubleClick":
-                            pyautogui.doubleClick(x, y)
-                        elif action == "mouseDown":
-                            pyautogui.mouseDown(x, y)
-                        elif action == "mouseUp":
-                            pyautogui.mouseUp(x, y)
-                        elif action == "scrollUp":
-                            # 移动到坐标后，再执行滚轮操作
-                            pyautogui.moveTo(x, y)
-                            # 循环 count_val 次，每次滚动 70 行（正值表示向上滚动）
-                            for _ in range(count_val):
-                                pyautogui.scroll(70, x=x, y=y)
-                        elif action == "scrollDown":
-                            # 移动到坐标后，再执行滚轮操作
-                            pyautogui.moveTo(x, y)
-                            # 循环 count_val 次，每次滚动 70 行（调用时转换为负值表示向下滚动）
-                            for _ in range(count_val):
-                                pyautogui.scroll(-70, x=x, y=y)
+                            # 计算点击或滚动的参考位置
+                            if is_dynamic == "1":
+                                x = max_loc[0] + template.shape[1] // 2
+                                y = max_loc[1] + template.shape[0] // 2
+                            else:
+                                x, y = map(int, coords.split(","))
+
+                            # 执行相应的鼠标操作
+                            if action == "click":
+                                for _ in range(count_val):
+                                    pyautogui.click(x, y)
+                            elif action == "rightClick":
+                                pyautogui.moveTo(x, y)
+                                pyautogui.rightClick()
+                            elif action == "doubleClick":
+                                pyautogui.doubleClick(x, y)
+                            elif action == "mouseDown":
+                                pyautogui.mouseDown(x, y)
+                            elif action == "mouseUp":
+                                pyautogui.mouseUp(x, y)
+                            elif action == "scrollUp":
+                                # 移动到坐标后，再执行滚轮操作
+                                pyautogui.moveTo(x, y)
+                                # 循环 count_val 次，每次滚动 70 行（正值表示向上滚动）
+                                for _ in range(count_val):
+                                    pyautogui.scroll(70, x=x, y=y)
+                            elif action == "scrollDown":
+                                # 移动到坐标后，再执行滚轮操作
+                                pyautogui.moveTo(x, y)
+                                # 循环 count_val 次，每次滚动 70 行（调用时转换为负值表示向下滚动）
+                                for _ in range(count_val):
+                                    pyautogui.scroll(-70, x=x, y=y)
                     else:
                         # 处理旧格式的坐标（向后兼容）
                         x, y = map(int, mouse_coordinates.split(','))
@@ -1608,10 +1634,6 @@ class ImageRecognitionApp:
                     print(f"【{step_name}】，操作执行出错: {e}")
                     print(f"【{step_name}】，执行鼠标操作：{mouse_coordinates}")
                     logging.info(f"【{step_name}】，执行鼠标操作：{mouse_coordinates}")
-
-                except Exception as e:
-                    print(f"【{step_name}】，鼠标操作时出错: {e}")
-                    logging.error(f"【{step_name}】，鼠标操作时出错: {e}")
                     return False
                 
             # 再处理键盘动作
@@ -1727,7 +1749,7 @@ class ImageRecognitionApp:
             # 创建新窗口
             dialog = tk.Toplevel(self.root)
             dialog.withdraw()                     # 先隐藏
-            dialog.title("修改键盘动作")
+            dialog.title("设置键盘操作")
             dialog.transient(self.root)
             dialog.grab_set()
                 
@@ -1815,7 +1837,8 @@ class ImageRecognitionApp:
                 self.image_list[selected_index] = (
                     selected_image[0], selected_image[1], selected_image[2],
                     new_keyboard_input, selected_image[4], selected_image[5],
-                    selected_image[6], selected_image[7], selected_image[8], selected_image[9], selected_image[10]
+                    selected_image[6], selected_image[7], selected_image[8], selected_image[9], selected_image[10],
+                    selected_image[11], selected_image[12], selected_image[13],
                 )
                 self.update_image_listbox()
                 dialog.destroy()
@@ -1891,6 +1914,9 @@ class ImageRecognitionApp:
                     current_dynamic = parts[2] == "1"
                     if current_action in ["click", "scrollUp", "scrollDown"] and len(parts) == 4:
                         current_count = parts[3]
+                if len(parts) >= 2:
+                    current_action = parts[0]
+                    current_coords = parts[1]
                 else:
                     current_coords = selected_image[4]
             except:
@@ -1951,6 +1977,9 @@ class ImageRecognitionApp:
         scroll_down_entry.pack(side=tk.LEFT, padx=5)
         tk.Label(frame_scroll_down, text="行").pack(side=tk.LEFT)
 
+        # 添加无操作选项
+        tk.Radiobutton(action_frame, value="none", text="无操作", variable=action_var).pack(anchor=tk.W)
+
         # 动态点击勾选框
         dynamic_var = tk.BooleanVar(value=current_dynamic)
         tk.Checkbutton(action_frame, text="动态点击", variable=dynamic_var).pack(anchor=tk.W)
@@ -1959,64 +1988,65 @@ class ImageRecognitionApp:
             try:
                 # 获取坐标
                 coords = coord_entry.get().strip()
-                if not coords or "," not in coords:
+                if not coords or "," not in coords:  # 无操作也需要坐标验证
                     messagebox.showerror("错误", "请输入有效的坐标 (x,y)", parent=dialog)
                     return
-
+                    
                 try:
-                    x, y = map(int, coords.split(","))
+                    x, y = map(int, coords.split(","))  # 验证坐标是否为整数
                 except ValueError:
                     messagebox.showerror("错误", "坐标必须是整数", parent=dialog)
                     return
 
                 action = action_var.get()
-                dynamic = "1" if dynamic_var.get() else "0"
-
-                # 获取次数或滚动行数
-                if action == "click":
-                    count_str = left_click_entry.get().strip() if left_click_entry else "1"
-                elif action == "scrollUp":
-                    count_str = scroll_up_entry.get().strip()
-                elif action == "scrollDown":
-                    count_str = scroll_down_entry.get().strip()
-                else:
-                    count_str = "1"
-
-                try:
-                    count_val = int(count_str)
-                    if count_val < 1:
-                        raise ValueError
-                except ValueError:
-                    messagebox.showerror("错误", "请输入有效的次数/行数（正整数）", parent=dialog)
-                    return
-
-                # 生成鼠标操作字符串
-                if action in ["click", "scrollUp", "scrollDown"]:
-                    mouse_action = f"{action}:{coords}:{dynamic}:{count_val}"
-                else:
-                    mouse_action = f"{action}:{coords}:{dynamic}"
-
-                # 转换鼠标操作字符串为可读格式
-                action_mapping = {
-                    "click": "左键单击",
-                    "rightClick": "右键单击",
-                    "doubleClick": "双击",
-                    "mouseDown": "按住",
-                    "mouseUp": "释放",
-                    "scrollUp": "向上滚动",
-                    "scrollDown": "向下滚动"
-                }
                 
-                action_desc = action_mapping.get(action, action)
-                dynamic_desc = " 启用动态点击" if dynamic == "1" else ""
-                unit = "行" if action in ["scrollUp", "scrollDown"] else "次"
-                
-                if action in ["click", "scrollUp", "scrollDown"]:
-                    mouse_action_result = f"{action_desc} {count_val}{unit}{dynamic_desc}"
+                if action == "none":
+                    # 无操作模式：只保留坐标
+                    mouse_action = f"{action}:{coords}"
+                    mouse_action_result = ""  # 显示为空
                 else:
-                    mouse_action_result = f"{action_desc}{dynamic_desc}"
+                    dynamic = "1" if dynamic_var.get() else "0"
 
-                # 更新 image_list
+                    # 获取次数/行数
+                    if action == "click":
+                        count_str = left_click_entry.get().strip() if left_click_entry else "1"
+                    elif action in ["scrollUp", "scrollDown"]:
+                        count_str = scroll_up_entry.get().strip() if action == "scrollUp" else scroll_down_entry.get().strip()
+                    else:
+                        count_str = "1"
+
+                    try:
+                        count_val = int(count_str)
+                        if count_val < 1:
+                            raise ValueError
+                    except ValueError:
+                        messagebox.showerror("错误", "请输入有效的次数/行数（正整数）", parent=dialog)
+                        return
+
+                    # 生成标准格式
+                    if action in ["click", "scrollUp", "scrollDown"]:
+                        mouse_action = f"{action}:{coords}:{dynamic}:{count_val}"
+                    else:
+                        mouse_action = f"{action}:{coords}:{dynamic}"
+
+                    # 生成可读描述
+                    action_mapping = {
+                        "click": "左键单击",
+                        "rightClick": "右键单击",
+                        "doubleClick": "双击",
+                        "mouseDown": "按住",
+                        "mouseUp": "释放",
+                        "scrollUp": "向上滚动",
+                        "scrollDown": "向下滚动"
+                    }
+                    action_desc = action_mapping.get(action, action)
+                    dynamic_desc = " 启用动态点击" if dynamic == "1" else ""
+                    unit = "行" if action in ["scrollUp", "scrollDown"] else "次"
+                    
+                    mouse_action_result = f"{action_desc} {count_val}{unit}{dynamic_desc}" if action in ["click", "scrollUp", "scrollDown"] \
+                                        else f"{action_desc}{dynamic_desc}"
+
+                # 更新数据
                 self.image_list[selected_index] = (
                     selected_image[0], selected_image[1], selected_image[2],
                     selected_image[3], mouse_action, selected_image[5],
@@ -2027,7 +2057,7 @@ class ImageRecognitionApp:
                 dialog.destroy()
 
             except Exception as e:
-                messagebox.showerror("错误", f"保存鼠标操作时出错: {str(e)}", parent=dialog)
+                messagebox.showerror("错误", f"保存时出错: {str(e)}", parent=dialog)
 
         # 添加保存和取消按钮
         button_frame = tk.Frame(dialog)
@@ -2680,17 +2710,18 @@ class ImageRecognitionApp:
             for item in self.tree.get_children():
                 self.tree.delete(item)
 
-            for img_data in self.image_list:
-                # 确保每个项目都有 11 个元素
-                while len(img_data) < 11:
-                    img_data = img_data + [""]
+            for i, img_data in enumerate(self.image_list):
+                # 确保每个项目都有 14 个元素
+                if len(img_data) < 14:
+                    img_data += [""] * (14 - len(img_data))
+                    self.image_list[i] = img_data  # 更新原列表中的内容
 
                 # 加载图像并创建缩略图
                 try:
                     image = Image.open(img_data[0])
                     image.thumbnail((50, 50))
                     photo = ImageTk.PhotoImage(image)
-                    
+
                     # 插入到 Treeview
                     tree_item = self.tree.insert("", tk.END, values=(
                         os.path.basename(img_data[0]),  # 图片名称
@@ -2704,12 +2735,15 @@ class ImageRecognitionApp:
                         img_data[8],  # 状态
                         img_data[9],  # 需禁用
                         img_data[10], # 鼠标动作
+                        img_data[11], # 条件2
+                        img_data[12], # 需跳转2
+                        img_data[13], # 需禁用2
                     ), image=photo)
                     self.tree.image_refs.append(photo)
                 except Exception as e:
                     print(f"处理图像时出错 {img_data[0]}: {e}")
                     logging.error(f"处理图像时出错 {img_data[0]}: {e}")
-            
+      
             # 更新循环次数输入框
             self.loop_count_entry.delete(0, tk.END)
             self.loop_count_entry.insert(0, str(self.loop_count))
@@ -3092,7 +3126,8 @@ class ImageRecognitionApp:
             self.image_list[selected_index] = (
                 selected_image[0], selected_image[1], selected_image[2], 
                 selected_image[3], mouse_action, selected_image[5], 
-                selected_image[6], selected_image[7], selected_image[8], selected_image[9], selected_image[10]
+                selected_image[6], selected_image[7], selected_image[8], selected_image[9], selected_image[10],
+                selected_image[11], selected_image[12], selected_image[13], 
             )
 
             step_name = selected_image[1]
@@ -3264,7 +3299,10 @@ class ImageRecognitionApp:
                 selected_image[7],  # 需跳转
                 new_status,         # 更新状态
                 selected_image[9], # 【需禁用】目标
-                selected_image[10] #鼠标动作
+                selected_image[10], #鼠标动作
+                selected_image[11],  # 条件2
+                selected_image[12],  # 需跳转2
+                selected_image[13],  # 需禁用2
             )
 
             # 更新数据源
@@ -3283,6 +3321,9 @@ class ImageRecognitionApp:
                 updated_image[8],
                 updated_image[9],
                 updated_image[10],
+                updated_image[11],
+                updated_image[12],
+                updated_image[13],
             ))
             self.update_context_menu()
             self.update_image_listbox()
@@ -3582,7 +3623,10 @@ class ImageRecognitionApp:
                 selected_image[7],
                 selected_image[8],
                 selected_image[9],
-                selected_image[10]
+                selected_image[10],
+                selected_image[11],
+                selected_image[12],
+                selected_image[13]
             )
             self.update_image_listbox()
             dialog.destroy()
@@ -3665,7 +3709,10 @@ class ImageRecognitionApp:
                     selected_image[7],
                     selected_image[8],
                     selected_image[9],
-                    selected_image[10]
+                    selected_image[10],
+                    selected_image[11],
+                    selected_image[12],
+                    selected_image[13],
                 )
                 self.update_image_listbox()
                 dialog.destroy()
@@ -3726,7 +3773,10 @@ class ImageRecognitionApp:
                 selected_image[7],
                 selected_image[8],
                 selected_image[9],
-                selected_image[10]
+                selected_image[10],
+                selected_image[11],
+                selected_image[12],
+                selected_image[13],
             )
             # 更新界面显示
             self.update_image_listbox()
@@ -3751,7 +3801,10 @@ class ImageRecognitionApp:
                 selected_image[7],  # 需跳转（索引 7）
                 selected_image[8],  # 状态（索引 8，必须保留）
                 selected_image[9],   # 需禁用（索引 9，必须保留）
-                selected_image[10] #鼠标动作
+                selected_image[10], #鼠标动作
+                selected_image[11],  # 条件2
+                selected_image[12],   # 需跳转2
+                selected_image[13], #需禁用2
             )
             
             # 更新界面显示
@@ -3794,12 +3847,12 @@ class ImageRecognitionApp:
                     selected_image[7],
                     selected_image[8],
                     selected_image[9],
-                    selected_image[10]
+                    selected_image[10],
+                    selected_image[11],
+                    selected_image[12],
+                    selected_image[13],
                 )
                 self.update_image_listbox()
-                dialog.destroy()
-
-            def on_cancel():
                 dialog.destroy()
                 
             # 在创建按钮时添加bootstyle参数
@@ -3846,98 +3899,227 @@ class ImageRecognitionApp:
 
         selected_item = selected_items[0]
         selected_index = self.tree.index(selected_item)
+        # 复制一份可变的列表用于修改（原先是 tuple）
         selected_image = list(self.image_list[selected_index])
 
         # 创建对话框
         dialog = tk.Toplevel(self.root)
-        dialog.withdraw()                     # 先隐藏
+        dialog.withdraw()  # 先隐藏，等布局完成再展示
         dialog.title("条件跳转")
         dialog.transient(self.root)
         dialog.grab_set()
 
-        # 条件选择
+        ##################
+        # 条件选择（两列 Combobox）
+        ##################
         condition_frame = tk.Frame(dialog)
         condition_frame.pack(pady=5)
         tk.Label(condition_frame, text="条件为:").pack(side=tk.LEFT)
-        
-        # 初始化条件值
-        current_condition = selected_image[6] if len(selected_image) > 6 else ""
-        condition_var = tk.StringVar(value="无" if not current_condition else current_condition)
-        condition_combo = ttk.Combobox(
-            condition_frame, 
-            textvariable=condition_var, 
-            values=["识图成功", "识图失败", "无"], 
-            width=15
-        )
-        condition_combo.pack(side=tk.LEFT)
 
-        # 需跳转选择
+        # 取出现有的两个条件值（如果没有则置为空）
+        current_condition1 = selected_image[6] if len(selected_image) > 6 else ""
+        current_condition2 = selected_image[11] if len(selected_image) > 11 else ""
+        # 如果为空则显示“无”，否则就显示现有值
+        condition_var1 = tk.StringVar(value="无" if not current_condition1 else current_condition1)
+        condition_var2 = tk.StringVar(value="无" if not current_condition2 else current_condition2)
+        conditon_value1 = ["识图成功", "无"]
+        conditon_value2 = ["识图失败", "无"]
+
+        # 第一个条件下拉框
+        condition_combo1 = ttk.Combobox(
+            condition_frame,
+            textvariable=condition_var1,
+            values=conditon_value1,
+            width=12
+        )
+        condition_combo1.pack(side=tk.LEFT, padx=(0, 10))
+
+        # 第二个条件下拉框
+        condition_combo2 = ttk.Combobox(
+            condition_frame,
+            textvariable=condition_var2,
+            values=conditon_value2,
+            width=12
+        )
+        condition_combo2.pack(side=tk.LEFT)
+
+        ##################
+        # 跳转到选择（两列 Combobox）
+        ##################
         jump_frame = tk.Frame(dialog)
         jump_frame.pack(pady=5)
         tk.Label(jump_frame, text="跳转到:").pack(side=tk.LEFT)
-        
-        # 初始化跳转值
-        current_jump = selected_image[7] if len(selected_image) > 7 else ""
-        jump_var = tk.StringVar(value="无" if not current_jump else current_jump)
-        step_names = ["无"] + [img[1] for img in self.image_list if img[1]]  # 获取所有步骤名称
-        jump_combo = ttk.Combobox(
-            jump_frame, 
-            textvariable=jump_var, 
-            values=step_names, 
-            width=15
-        )
-        jump_combo.pack(side=tk.LEFT)
 
-        # 需禁用选择
+        # 生成所有步骤名称供下拉使用（第一个值固定为“无”）
+        step_names = ["无"] + [img[1] for img in self.image_list if img[1]]
+
+        # 取出现有的两个跳转值
+        current_jump1 = selected_image[7] if len(selected_image) > 7 else ""
+        current_jump2 = selected_image[12] if len(selected_image) > 12 else ""
+        jump_var1 = tk.StringVar(value="无" if not current_jump1 else current_jump1)
+        jump_var2 = tk.StringVar(value="无" if not current_jump2 else current_jump2)
+
+        # 第一个跳转下拉框
+        jump_combo1 = ttk.Combobox(
+            jump_frame,
+            textvariable=jump_var1,
+            values=step_names,
+            width=12
+        )
+        jump_combo1.pack(side=tk.LEFT, padx=(0, 10))
+
+        # 第二个跳转下拉框
+        jump_combo2 = ttk.Combobox(
+            jump_frame,
+            textvariable=jump_var2,
+            values=step_names,
+            width=12
+        )
+        jump_combo2.pack(side=tk.LEFT)
+
+        ##################
+        # 需禁用选择（两列 Combobox）
+        ##################
         disable_frame = tk.Frame(dialog)
         disable_frame.pack(pady=5)
         tk.Label(disable_frame, text="需禁用:").pack(side=tk.LEFT)
-        
-        # 初始化禁用值
-        current_disable = selected_image[9] if len(selected_image) > 9 else ""
-        disable_var = tk.StringVar(value="无" if not current_disable else current_disable)
-        disable_combo = ttk.Combobox(
-            disable_frame, 
-            textvariable=disable_var, 
-            values=step_names, 
-            width=15
+
+        # 取出现有的两个禁用值
+        current_disable1 = selected_image[9] if len(selected_image) > 9 else ""
+        current_disable2 = selected_image[13] if len(selected_image) > 13 else ""
+        disable_var1 = tk.StringVar(value="无" if not current_disable1 else current_disable1)
+        disable_var2 = tk.StringVar(value="无" if not current_disable2 else current_disable2)
+
+        # 第一个禁用下拉框
+        disable_combo1 = ttk.Combobox(
+            disable_frame,
+            textvariable=disable_var1,
+            values=step_names,
+            width=12
         )
-        disable_combo.pack(side=tk.LEFT)
+        disable_combo1.pack(side=tk.LEFT, padx=(0, 10))
 
+        # 第二个禁用下拉框
+        disable_combo2 = ttk.Combobox(
+            disable_frame,
+            textvariable=disable_var2,
+            values=step_names,
+            width=12
+        )
+        disable_combo2.pack(side=tk.LEFT)
+
+        ##################
+        # 逻辑绑定：
+        # 1. 当 条件1 或 条件2 被设置为“无”时，自动将对应的跳转和禁用设为“无”
+        # 2. 当 跳转1 或 禁用1 不为“无”时，强制将 条件1 设为“识图成功”；否则条件1 设为“无”
+        #    同理：跳转2/禁用2 不为“无”时，强制将 条件2 设为“识图失败”；否则条件2 设为“无”
+        ##################
+
+        # —— 条件变为“无”时，重置对应的跳转和禁用 —— #
+        def on_condition1_change(event):
+            if condition_var1.get() == "无":
+                jump_var1.set("无")
+                disable_var1.set("无")
+
+        def on_condition2_change(event):
+            if condition_var2.get() == "无":
+                jump_var2.set("无")
+                disable_var2.set("无")
+
+        condition_combo1.bind("<<ComboboxSelected>>", on_condition1_change)
+        condition_combo2.bind("<<ComboboxSelected>>", on_condition2_change)
+
+        # —— 跳转或禁用被设置后，调整对应的条件 —— #
+        def update_condition1(_event=None):
+            # 只要跳转1或禁用1有一个不为“无”，就设置条件1为“识图成功”，否则为“无”
+            if jump_var1.get() != "无" or disable_var1.get() != "无":
+                condition_var1.set("识图成功")
+            else:
+                condition_var1.set("无")
+
+        def update_condition2(_event=None):
+            # 只要跳转2或禁用2有一个不为“无”，就设置条件2为“识图失败”，否则为“无”
+            if jump_var2.get() != "无" or disable_var2.get() != "无":
+                condition_var2.set("识图失败")
+            else:
+                condition_var2.set("无")
+
+        # 将回调函数绑定到跳转1、禁用1的选中事件
+        jump_combo1.bind("<<ComboboxSelected>>", update_condition1)
+        disable_combo1.bind("<<ComboboxSelected>>", update_condition1)
+
+        # 将回调函数绑定到跳转2、禁用2的选中事件
+        jump_combo2.bind("<<ComboboxSelected>>", update_condition2)
+        disable_combo2.bind("<<ComboboxSelected>>", update_condition2)
+
+        # 布局完成后再显示窗口
+        dialog.deiconify()
+
+        ##################
+        # 保存回调函数（收集并写回 selected_image）
+        ##################
         def save_condition():
-            condition = condition_var.get()
-            jump_to = jump_var.get()
-            disable_step = disable_var.get()
+            # 读取用户选择
+            cond1 = condition_var1.get()
+            cond2 = condition_var2.get()
+            jump1 = jump_var1.get()
+            jump2 = jump_var2.get()
+            dis1 = disable_var1.get()
+            dis2 = disable_var2.get()
 
-            # 映射字符串
-            condition = "" if condition == "无" else condition
-            jump_to = "" if jump_to == "无" else jump_to
-            disable_step = "" if disable_step == "无" else disable_step
+            # 如果用户选了“无”，就映射为空字符串
+            cond1 = "" if cond1 == "无" else cond1
+            cond2 = "" if cond2 == "无" else cond2
+            jump1 = "" if jump1 == "无" else jump1
+            jump2 = "" if jump2 == "无" else jump2
+            dis1 = "" if dis1 == "无" else dis1
+            dis2 = "" if dis2 == "无" else dis2
 
-            # 验证逻辑
-            if (jump_to or disable_step) and not condition:
-                messagebox.showwarning("警告", "当设置了跳转或禁用目标时，必须指定条件！", parent=dialog)
+            # 验证逻辑：只要存在任意跳转或禁用，就必须填写条件
+            if (jump1 or dis1) and not (cond1):
+                messagebox.showwarning(
+                    "警告", 
+                    "请指定条件1！", 
+                    parent=dialog
+                )
+                return
+            
+            if (jump2 or dis2) and not (cond2):
+                messagebox.showwarning(
+                    "警告", 
+                    "请指定条件2！", 
+                    parent=dialog
+                )
                 return
 
             try:
-                # 确保列表长度足够
-                while len(selected_image) < 10:
+                # 确保 selected_image 列表长度至少为 14（索引 0 到 13）
+                while len(selected_image) < 12:
                     selected_image.append("")
 
-                selected_image[6] = condition
-                selected_image[7] = jump_to
-                selected_image[9] = disable_step
+                # 将用户选择写回对应位置
+                selected_image[6] = cond1
+                selected_image[11] = cond2
+                selected_image[7] = jump1
+                selected_image[12] = jump2
+                selected_image[9] = dis1
+                selected_image[13] = dis2
 
+                # 更新 self.image_list 中的元组
                 self.image_list[selected_index] = tuple(selected_image)
+                # 刷新界面上的列表显示
                 self.update_image_listbox()
 
-                # 重新选中项目
+                # 重新选中刚才的项目，保持焦点
                 items = self.tree.get_children()
                 if selected_index < len(items):
                     self.tree.selection_set(items[selected_index])
                     self.tree.focus(items[selected_index])
 
-                logging.info(f"更新条件跳转设置：条件={condition}, 跳转到={jump_to}, 需禁用={disable_step}")
+                logging.info(
+                    f"更新条件跳转设置：" 
+                    f"条件1={cond1}, 条件2={cond2}, 跳转1={jump1}, 跳转2={jump2}, 禁用1={dis1}, 禁用2={dis2}"
+                )
             except Exception as e:
                 logging.error(f"保存条件跳转设置出错: {str(e)}")
                 messagebox.showerror("错误", f"保存失败: {str(e)}", parent=dialog)
@@ -3970,8 +4152,8 @@ class ImageRecognitionApp:
         req_w = dialog.winfo_reqwidth()
         req_h = dialog.winfo_reqheight()
 
-        # 目标比例 4:3
-        ratio_w, ratio_h = 4, 3
+        # 目标比例 9:5
+        ratio_w, ratio_h = 9, 5
 
         # 方案 A：以理想宽度 req_w 为基准，计算对应的高度
         h_based_on_w = int(req_w * ratio_h / ratio_w)
@@ -3993,7 +4175,7 @@ class ImageRecognitionApp:
         x = main_x + (main_w - new_w) // 2
         y = main_y + (main_h - new_h) // 2
 
-        # 一次性设置大小（强制 4:3）和位置，并显示
+        # 一次性设置大小和位置，并显示
         dialog.geometry(f"{new_w}x{new_h}+{x}+{y}")
         dialog.deiconify()
         dialog.iconbitmap("icon/app.ico")  # 设置窗口图标
