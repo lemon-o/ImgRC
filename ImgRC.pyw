@@ -382,7 +382,7 @@ class ImageRecognitionApp:
         # 详细信息标签区域
         # —— 第一行：标题 + 文件名 —— #
         self.label_frame = tk.Frame(self.region_d)
-        self.label_frame.pack(fill="x", pady=(20, 3))
+        self.label_frame.pack(fill="x",padx=10, pady=(20, 3))
 
         # 标题“详细信息”
         # 获取默认字体，并克隆一个出来
@@ -423,7 +423,7 @@ class ImageRecognitionApp:
         }
         for lbl in self.labels.values():
             lbl.configure(foreground="#495057")
-            lbl.pack(fill="x", padx=0, pady=0)
+            lbl.pack(fill="x", padx=10, pady=0)
             
         # 绑定焦点事件
         self.tree.bind("<FocusIn>", self.update_label)
