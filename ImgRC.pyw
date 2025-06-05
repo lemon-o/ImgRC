@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox
+from urllib.parse import urlparse
 import zipfile
 from PIL import Image, ImageTk, ImageGrab
 import cv2
@@ -27,6 +28,10 @@ from ttkbootstrap.constants import *
 import ttkbootstrap as ttk
 from ttkbootstrap.tooltip import ToolTip
 import tkinter.font as tkfont
+import requests
+from packaging import version
+
+CURRENT_VERSION = "v1.1.2" #版本号
 
 def run_as_admin():
     if ctypes.windll.shell32.IsUserAnAdmin():
@@ -84,6 +89,19 @@ class ImageRecognitionApp:
         self.import_and_load = False
         self.config_loaded = False
         self.is_cut_mode = False # 用来标记当前操作是剪切而非普通复制
+
+        self.checking_update = False
+        self.downloading = False
+        self.latest_version = ""
+        self.update_available = False
+        self.download_url = ""
+        self.update_window = None
+        self.progress_bar = None
+        self.status_label = None
+        self.update_button = None
+        self.cancel_button = None
+        self.button_frame = None
+
         self.cut_original_indices = []  # 存放被剪切条目的原始索引
         self.copied_items = []
         self.screen_scale = 1
@@ -595,6 +613,474 @@ class ImageRecognitionApp:
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s'
         )
+
+    #以下是检测更新的函数
+    def check_update(self):
+        """通过菜单按钮触发的更新检查"""
+        if self.checking_update or self.downloading:
+            return
+            
+        self.checking_update = True
+        try:
+            self._create_update_window("正在检查更新...", show_progress=False)
+            
+            update_thread = threading.Thread(
+                target=self._check_update_background,
+                daemon=True
+            )
+            update_thread.start()
+            
+        except Exception as e:
+            self.checking_update = False
+            messagebox.showerror("错误", f"启动更新检查失败: {str(e)}")
+            if self.update_window and self.update_window.winfo_exists():
+                self.update_window.destroy()
+
+    def _create_update_window(self, message, show_progress=False):
+        """创建/更新共用窗口"""
+        try:
+            # 如果窗口不存在，则先创建
+            if self.update_window is None or not self.update_window.winfo_exists():
+                # 创建新窗口并暂时隐藏
+                self.update_window = tk.Toplevel(self.root)
+                self.update_window.withdraw()
+                self.update_window.title("检查更新")
+                self.update_window.transient(self.root)
+                self.update_window.grab_set()
+                
+                # 先让根窗口计算完毕，以获取最新的尺寸
+                self.root.update_idletasks()
+                main_w = self.root.winfo_width()
+                main_h = self.root.winfo_height()
+                
+                # 根据根窗口尺寸，计算更新窗口的大小
+                new_w = int(main_w * 329 / 669)
+                new_h = int(main_h * 160 / 544)
+                
+                # 计算承载状态标签的容器宽高
+                container_w = int(new_w * 180 / 203)
+                container_h = int(new_h * 100 / 399)
+                
+                # -------------------- 标题 Label --------------------
+                self.title_label = ttk.Label(
+                    self.update_window,
+                    text="软件更新",
+                    font=('Microsoft YaHei', 12, 'bold')
+                )
+                self.title_label.pack(pady=(10, 5))
+                
+                # -------------------- 状态容器 --------------------
+                self.status_frame = ttk.Frame(
+                    self.update_window,
+                    width=container_w,
+                    height=container_h
+                )
+                self.status_frame.pack_propagate(False)
+                self.status_frame.pack(pady=(0, 10))
+                
+                # 状态标签
+                self.status_label = ttk.Label(
+                    self.status_frame,
+                    text=message,
+                    font=('Microsoft YaHei', 10)
+                )
+                self.status_label.pack(expand=True)
+                
+                # -------------------- 进度条 --------------------
+                self.progress_bar = ttk.Progressbar(
+                    self.update_window,
+                    orient="horizontal",
+                    length=container_w,
+                    mode="determinate"
+                )
+                
+                # -------------------- 按钮容器 --------------------
+                self.button_frame = ttk.Frame(self.update_window)
+                self.button_frame.pack(pady=10)
+                
+                # 更新按钮
+                self.update_button = ttk.Button(
+                    self.button_frame,
+                    text="更新",
+                    command=self._safe_start_download,
+                    bootstyle="primary-outline"
+                )
+                self.update_button.pack(side="left", padx=10)
+                
+                # 取消按钮
+                self.cancel_button = ttk.Button(
+                    self.button_frame,
+                    text="取消",
+                    command=self._safe_cancel_update,
+                    bootstyle="primary-outline"
+                )
+                self.cancel_button.pack(side="left", padx=10)
+                
+                # 窗口关闭事件
+                self.update_window.protocol("WM_DELETE_WINDOW", self._safe_cancel_update)
+                
+                # 设置图标
+                self.update_window.iconbitmap("icon/app.ico")
+                
+                # 设置窗口位置
+                main_x = self.root.winfo_x()
+                main_y = self.root.winfo_y()
+                x = main_x + (main_w - new_w) // 2
+                y = main_y + (main_h - new_h) // 2
+                self.update_window.geometry(f"{new_w}x{new_h}+{x}+{y}")
+                
+                # 显示窗口
+                self.update_window.deiconify()
+            
+            else:
+                # 更新状态文字
+                self.status_label.config(text=message)
+            
+            # 根据参数决定显示内容
+            if show_progress:
+                # 立即删除按钮并显示进度条
+                self._remove_buttons()
+                self.progress_bar.pack(pady=5)
+                self.progress_bar['value'] = 0
+            else:
+                # 确保按钮可见
+                self.button_frame.pack(pady=10)
+                self.progress_bar.pack_forget()
+                
+                # 更新按钮状态
+                if hasattr(self, 'update_available'):
+                    state = "normal" if self.update_available else "disabled"
+                    self.update_button.config(state=state)
+        
+            # 强制布局更新
+            self.update_window.update_idletasks()
+
+        except Exception as e:
+            messagebox.showerror("窗口创建错误", f"创建更新窗口失败: {str(e)}")
+
+    def _remove_buttons(self):
+        """永久删除按钮组件"""
+        try:
+            if hasattr(self, 'button_frame') and self.button_frame.winfo_exists():
+                # 销毁按钮框架及其所有子组件
+                self.button_frame.destroy()
+                
+                # 删除相关属性（可选，如果不打算重新创建按钮）
+                del self.button_frame
+                del self.update_button
+                del self.cancel_button
+                
+        except Exception as e:
+            messagebox.showerror("错误", f"删除按钮失败: {str(e)}")
+
+    def _safe_start_download(self):
+        """安全启动下载，处理可能的异常"""
+        try:
+            self._start_download()
+        except Exception as e:
+            messagebox.showerror("错误", f"启动下载失败: {str(e)}")
+            if self.update_window and self.update_window.winfo_exists():
+                self.update_window.destroy()
+
+    def _safe_cancel_update(self):
+        """安全取消更新，处理可能的异常"""
+        try:
+            self._cancel_update()
+        except Exception as e:
+            messagebox.showerror("错误", f"取消操作失败: {str(e)}")
+
+
+    def _cancel_update(self):
+        """取消更新操作"""
+        self.checking_update = False
+        self.downloading = False
+        if self.update_window and self.update_window.winfo_exists():
+            self.update_window.destroy()
+        self.update_window = None
+
+    def _check_update_background(self):
+        """后台检查更新逻辑"""
+        try:
+            response = requests.get(
+                "https://api.github.com/repos/lemon-o/ImgRC/releases/latest",
+                timeout=10
+            )
+            response.raise_for_status()
+            
+            latest_release = response.json()
+            self.latest_version = latest_release['tag_name']
+            self.download_url = self._find_windows_installer(latest_release.get('assets', []))
+            
+            if not self.download_url:
+                raise Exception("未找到Windows安装程序")
+            
+            current = version.parse(CURRENT_VERSION.lstrip('v'))
+            latest = version.parse(self.latest_version.lstrip('v'))
+            
+            if latest > current:
+                self.update_available = True
+                self.root.after(0, self._show_update_available)
+            else:
+                self.update_available = False
+                self.root.after(0, self._show_no_update)
+                
+        except requests.RequestException as e:
+            self.root.after(0, lambda: self._show_update_error(f"网络错误: {str(e)}"))
+        except Exception as e:
+            self.root.after(0, lambda: self._show_update_error(f"检查更新失败: {str(e)}"))
+        finally:
+            self.checking_update = False
+
+    def _find_windows_installer(self, assets):
+        """查找Windows安装程序"""
+        for asset in assets:
+            if asset['name'].endswith('.exe') and "setup" in asset['name'].lower():
+                return asset['browser_download_url']
+        for asset in assets:
+            if asset['name'].endswith('.msi'):
+                return asset['browser_download_url']
+        return ""
+
+    def _show_update_available(self):
+        """显示更新可用"""
+        try:
+            self._create_update_window(
+                f"发现新版本 {self.latest_version}，当前版本: {CURRENT_VERSION}",
+                show_progress=False
+            )
+            if self.update_button:
+                self.update_button.config(state="normal")
+        except Exception as e:
+            messagebox.showerror("错误", f"显示更新信息失败: {str(e)}")
+
+    def _show_no_update(self):
+        """显示已是最新版本"""
+        try:
+            self._create_update_window(
+                f"当前已是最新版本 ({CURRENT_VERSION})",
+                show_progress=False
+            )
+            if self.update_button:
+                self.update_button.config(state="disabled")
+        except Exception as e:
+            messagebox.showerror("错误", f"显示版本信息失败: {str(e)}")
+
+    def _show_update_error(self, message):
+        """显示更新错误"""
+        try:
+            self._create_update_window(
+                f"更新检查失败: {message}",
+                show_progress=False
+            )
+            if self.update_button:
+                self.update_button.config(state="disabled")
+            self.root.after(3000, self._cancel_update)
+        except Exception as e:
+            messagebox.showerror("错误", f"显示错误信息失败: {str(e)}")
+
+    def _start_download(self):
+        """开始下载更新"""
+        if not self.download_url:
+            messagebox.showerror("错误", "无法获取下载链接")
+            self._cancel_update()
+            return
+            
+        self.downloading = True
+        try:
+            self._create_update_window(
+                f"正在下载 {self.latest_version}...",
+                show_progress=True
+            )
+            
+            download_thread = threading.Thread(
+                target=self._download_and_install,
+                daemon=True
+            )
+            download_thread.start()
+        except Exception as e:
+            self.downloading = False
+            messagebox.showerror("错误", f"启动下载失败: {str(e)}")
+            self._cancel_update()
+
+    def format_speed(self, speed_bps):
+        """
+        将字节每秒 (B/s) 转换为字符串，自动选择 B/s、KB/s、MB/s 单位
+        例如：123 字节/秒 → "123.00 B/s"
+             4096 字节/秒 → "4.00 KB/s"
+             5*1024*1024 字节/秒 → "5.00 MB/s"
+        """
+        if speed_bps >= 1024 * 1024:
+            return f"{speed_bps / (1024 * 1024):.2f} MB/s"
+        elif speed_bps >= 1024:
+            return f"{speed_bps / 1024:.2f} KB/s"
+        else:
+            return f"{speed_bps:.2f} B/s"
+
+    def _download_and_install(self):
+        """下载并安装更新"""
+        try:
+            # 获取文件名
+            parsed_url = urlparse(self.download_url)
+            filename = os.path.basename(parsed_url.path)
+            temp_dir = os.environ.get('TEMP', os.getcwd())
+            download_path = os.path.join(temp_dir, filename)
+            
+            # 添加下载信息标签（单行显示）
+            self.root.after(0, self._add_download_info_labels)
+            
+            # 标记正在下载
+            self.downloading = True
+            
+            # 初始化速度计算相关变量
+            start_time = time.time()
+            self._last_update_time = start_time
+            self._last_size = 0
+            self._speed_history = []  # 存储最近 3 次的瞬时速度（B/s）
+            
+            downloaded = 0
+            
+            with requests.get(self.download_url, stream=True, timeout=30) as r:
+                r.raise_for_status()
+                total_size = int(r.headers.get('content-length', 0))
+                
+                # 开始写入文件
+                with open(download_path, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        if not self.downloading:
+                            # 如果中途取消下载，则删除临时文件并返回
+                            if os.path.exists(download_path):
+                                os.remove(download_path)
+                            return
+                        
+                        if chunk:
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            
+                            # 当前时间
+                            current_time = time.time()
+                            # 如果距离上次更新时间超过 0.1 秒，则计算速度并更新 UI
+                            if current_time - self._last_update_time >= 0.1:
+                                elapsed = current_time - self._last_update_time
+                                # 本次瞬时速度（单位 B/s）
+                                instant_speed = (downloaded - self._last_size) / elapsed
+                                
+                                # 将瞬时速度加入历史队列
+                                self._speed_history.append(instant_speed)
+                                if len(self._speed_history) > 3:
+                                    self._speed_history.pop(0)
+                                
+                                # 平滑速度 = 最近几次瞬时速度的平均值
+                                avg_speed = sum(self._speed_history) / len(self._speed_history)
+                                
+                                # 格式化速度字符串
+                                speed_str = self.format_speed(avg_speed)
+                                
+                                # 计算进度百分比（0~100）
+                                progress = int((downloaded / total_size) * 100) if total_size > 0 else 0
+                                
+                                # 异步回到主线程更新 UI：进度条 + 下载信息文本
+                                self.root.after(0, lambda p=progress, d=downloaded, t=total_size, s=speed_str: 
+                                                self._update_download_info(p, d, t, s))
+                                
+                                # 更新“上一次”相关数据
+                                self._last_update_time = current_time
+                                self._last_size = downloaded
+            
+            # 下载完成后，调用安装程序 (放在主线程)
+            self.root.after(0, self._run_installer, download_path)
+            
+        except Exception as e:
+            pass
+        finally:
+            self.downloading = False
+
+    def _add_download_info_labels(self):
+        """添加下载信息标签（单行显示）"""
+        if not hasattr(self, 'download_info_frame'):
+            # 在 update_window 窗口下创建 一个 Frame
+            self.download_info_frame = ttk.Frame(self.update_window)
+            self.download_info_frame.pack(pady=(0, 10))
+            
+            # 创建一个 Label 用来显示“已下载大小 / 总大小 | 速度”
+            self.download_info_label = ttk.Label(
+                self.download_info_frame,
+                text="0.00 MB / 0.00 MB | 速度: 0.00 B/s",
+                font=('Microsoft YaHei', 9)
+            )
+            self.download_info_label.pack()
+        
+        # 如果你还没有 progress_bar，需要在创建 update_window 的时候把它做出来：
+        # 假设在 _create_update_window 中，你已经创建了一个 ttk.Progressbar 并赋值给 self.progress_bar
+
+    def _update_download_info(self, progress, downloaded_bytes, total_bytes, speed_str):
+        """
+        更新下载信息显示（单行格式）
+        :param progress: 进度百分比（0~100）
+        :param downloaded_bytes: 已下载字节数
+        :param total_bytes: 总字节数
+        :param speed_str: 格式化后的速度字符串（例如 "1.23 MB/s"）
+        """
+        try:
+            if self.update_window and self.update_window.winfo_exists():
+                # 更新进度条数值
+                if self.progress_bar:
+                    self.progress_bar['value'] = progress
+                
+                # 将字节数转换为 MB 格式（保留两位小数）
+                downloaded_mb = downloaded_bytes / (1024 * 1024)
+                total_mb = total_bytes / (1024 * 1024) if total_bytes > 0 else 0.0
+                info_text = f"{downloaded_mb:.2f} MB / {total_mb:.2f} MB | 速度: {speed_str}"
+                
+                # 更新 Label 文本
+                self.download_info_label.config(text=info_text)
+                
+                # 强制刷新 UI
+                self.update_window.update()
+        except Exception:
+            pass  # 忽略更新 UI 时的任何异常
+
+    def _update_progress(self, progress):
+        """更新进度条"""
+        try:
+            if self.progress_bar and self.update_window and self.update_window.winfo_exists():
+                self.progress_bar['value'] = progress
+                self.update_window.update()
+        except Exception as e:
+            pass  # 忽略进度条更新错误
+
+    def _run_installer(self, installer_path):
+        """运行安装程序"""
+        try:
+            # 最小化主窗口
+            self.root.iconify()
+            
+            # 关闭更新窗口
+            self._cancel_update()
+            
+            # 运行安装程序
+            subprocess.Popen([installer_path], shell=True)
+            
+            # 退出当前程序
+            self.root.after(1000, self.root.destroy)
+            
+        except Exception as e:
+            self.root.deiconify()
+            messagebox.showerror("安装失败", f"无法启动安装程序: {str(e)}")
+
+    def _show_download_error(self, message):
+        """显示下载错误"""
+        try:
+            self._create_update_window(
+                f"下载失败: {message}",
+                show_progress=False
+            )
+            if self.update_button:
+                self.update_button.config(state="disabled")
+            self.root.after(3000, self._cancel_update)
+        except Exception as e:
+            messagebox.showerror("错误", f"显示下载错误失败: {str(e)}")
+
+    ####以上是检测更新的函数
 
     def on_treeview_drag_start(self, event):
         """开始拖动时记录选中的行"""
@@ -3213,6 +3699,7 @@ class ImageRecognitionApp:
         self.empty_space_menu.add_command(label="加载配置", command=self.load_config)
         self.empty_space_menu.add_separator()
         self.empty_space_menu.add_command(label="查看日志", command=self.show_logs)
+        self.empty_space_menu.add_command(label="检查更新", command=self.check_update)
 
         # 选中项的菜单
         self.context_menu = tk.Menu(self.root, tearoff=0, postcommand=self.update_context_menu)   
@@ -3240,6 +3727,7 @@ class ImageRecognitionApp:
         self.context_menu.add_command(label="清空列表", command=self.clear_list)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="查看日志", command=self.show_logs)
+        self.context_menu.add_command(label="检查更新", command=self.check_update)
 
         # 多选菜单
         self.multi_select_menu = tk.Menu(self.root, tearoff=0)
@@ -3253,6 +3741,7 @@ class ImageRecognitionApp:
         self.multi_select_menu.add_command(label="清空列表", command=self.clear_list)
         self.multi_select_menu.add_separator()
         self.multi_select_menu.add_command(label="查看日志", command=self.show_logs)
+        self.multi_select_menu.add_command(label="检查更新", command=self.check_update)
 
 
     def update_context_menu(self):
@@ -4143,7 +4632,7 @@ class ImageRecognitionApp:
             btn_frame, 
             text="取消", 
             command=dialog.destroy,
-            bootstyle="primary-outline"  # 次要轮廓样式
+            bootstyle="primary-outline"  
         )
         cancel_button.pack(side=tk.RIGHT, padx=5)
 
