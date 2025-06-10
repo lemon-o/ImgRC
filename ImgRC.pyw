@@ -31,7 +31,7 @@ import tkinter.font as tkfont
 import requests
 from packaging import version
 
-CURRENT_VERSION = "v1.1.2" #版本号
+CURRENT_VERSION = "v1.1.3" #版本号
 
 def run_as_admin():
     if ctypes.windll.shell32.IsUserAnAdmin():
@@ -135,27 +135,25 @@ class ImageRecognitionApp:
         self.region_l.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=5, pady=5)
 
         # 区域A：按钮区域
-        self.region_a = tb.Frame(self.region_l)
-        self.region_a.pack(fill=tk.X, padx=2, pady=0)
+        self.region_a = tb.Frame(self.region_l, height=100)  # 设置Frame的高度为100
+        self.region_a.pack(fill=tk.BOTH, padx=2, pady=0)
 
         # 图标缓存
         self.icons = {
             "export": load_icon("export.png"),
             "import": load_icon("import.png"),
             "save": load_icon("save.png"),
-            "load": load_icon("load.png")
+            "load": load_icon("load.png"),
+            "add": load_icon("add.png"),
         }
 
         self.hover_icons = {
             "export": load_icon("export_hover.png"),
             "import": load_icon("import_hover.png"),
             "save": load_icon("save_hover.png"),
-            "load": load_icon("load_hover.png")
+            "load": load_icon("load_hover.png"),
+            "add": load_icon("add_hover.png"),
         }
-
-        # 用于放置按钮的框架，设置为水平排列
-        self.config_button_frame = ttk.Frame(self.region_a)
-        self.config_button_frame.pack(pady=5)
 
         # 定义鼠标进入和离开的回调函数
         def on_enter(event, button, hover_icon):
@@ -164,12 +162,22 @@ class ImageRecognitionApp:
         def on_leave(event, button, normal_icon):
             button.config(image=normal_icon)
 
+        # 在 region_a 中创建带边框的容器
+        self.bordered_frame = tk.Frame(self.region_a)
+        self.bordered_frame.pack(fill=tk.BOTH, padx=0, pady=0)
+
+        # 配置按钮行
+        self.config_button_frame = ttk.Frame(self.bordered_frame)
+        self.config_button_frame.pack(fill=tk.BOTH, expand=True, pady=(5, 10))
+
         # 导出配置按钮
         self.Export_config_button = ttk.Button(
-            self.config_button_frame, image=self.icons["export"],
-            command=self.export_config, bootstyle="primary-outline"
+            self.config_button_frame, 
+            image=self.icons["export"],
+            command=self.export_config, 
+            bootstyle="primary-outline"
         )
-        self.Export_config_button.pack(side=tk.LEFT, padx=5)
+        self.Export_config_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
         ToolTip(self.Export_config_button, "导出配置")
         self.Export_config_button.bind(
             "<Enter>",
@@ -182,10 +190,12 @@ class ImageRecognitionApp:
 
         # 导入配置按钮
         self.Import_config_button = ttk.Button(
-            self.config_button_frame, image=self.icons["import"],
-            command=self.import_config, bootstyle="primary-outline"
+            self.config_button_frame, 
+            image=self.icons["import"],
+            command=self.import_config, 
+            bootstyle="primary-outline"
         )
-        self.Import_config_button.pack(side=tk.LEFT, padx=5)
+        self.Import_config_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
         ToolTip(self.Import_config_button, "导入配置")
         self.Import_config_button.bind(
             "<Enter>", 
@@ -198,10 +208,12 @@ class ImageRecognitionApp:
 
         # 保存配置按钮
         self.save_config_button = ttk.Button(
-            self.config_button_frame, image=self.icons["save"],
-            command=self.save_config, bootstyle="primary-outline"
+            self.config_button_frame, 
+            image=self.icons["save"],
+            command=self.save_config, 
+            bootstyle="primary-outline"
         )
-        self.save_config_button.pack(side=tk.LEFT, padx=5)
+        self.save_config_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
         ToolTip(self.save_config_button, "保存配置")
         self.save_config_button.bind(
             "<Enter>", 
@@ -214,10 +226,12 @@ class ImageRecognitionApp:
 
         # 加载配置按钮
         self.load_config_button = ttk.Button(
-            self.config_button_frame, image=self.icons["load"],
-            command=self.load_config, bootstyle="primary-outline"
+            self.config_button_frame, 
+            image=self.icons["load"],
+            command=self.load_config, 
+            bootstyle="primary-outline"
         )
-        self.load_config_button.pack(side=tk.LEFT, padx=5)
+        self.load_config_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 0))
         ToolTip(self.load_config_button, "加载配置")
         self.load_config_button.bind(
             "<Enter>", 
@@ -228,31 +242,47 @@ class ImageRecognitionApp:
             lambda e: on_leave(e, self.load_config_button, self.icons["load"]), add="+"  
         )
 
-        # 用于放置【截取图片】和【删除图片】
-        self.top_button_frame = tb.Frame(self.region_a)
-        self.top_button_frame.pack(pady=10)
+        # 操作按钮行
+        self.top_button_frame = tb.Frame(self.bordered_frame)
+        self.top_button_frame.pack(fill=tk.BOTH, expand=True, pady=(2, 10))
 
         # 截取图片按钮
-        self.screenshot_button = tb.Button(self.top_button_frame, text="截取图片", command=self.prepare_capture_screenshot, bootstyle="primary-outline")
-        self.screenshot_button.pack(side=tk.LEFT, padx=5)
+        self.screenshot_button = tb.Button(
+            self.top_button_frame, 
+            image=self.icons["add"],
+            command=self.prepare_capture_screenshot, 
+            bootstyle="primary-outline"
+        )
+        self.screenshot_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
+        ToolTip(self.screenshot_button, "截取图片以添加步骤")
+        self.screenshot_button.bind(
+            "<Enter>",
+            lambda e: on_enter(e, self.screenshot_button, self.hover_icons["add"]), add="+"    
+        )
+        self.screenshot_button.bind(
+            "<Leave>",
+            lambda e: on_leave(e, self.screenshot_button, self.icons["add"]), add="+"       
+        )
 
         # 运行/停止脚本按钮
-        self.toggle_run_button = tb.Button(self.top_button_frame, text="开始运行(F9)", command=self.toggle_script, bootstyle="primary-outline")
-        self.toggle_run_button.pack(side=tk.LEFT, padx=5)
+        self.toggle_run_button = tb.Button(
+            self.top_button_frame, 
+            text="开始运行(F9)", 
+            command=self.toggle_script, 
+            bootstyle="primary-outline"
+        )
+        self.toggle_run_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
 
         # 循环次数输入框
-        self.loop_count_frame = tb.Frame(self.region_a)
-        self.loop_count_frame.pack(pady=5)
-
-        self.loop_count_label = tb.Label(self.loop_count_frame, text="循环次数:")
-        self.loop_count_label.pack(side=tk.LEFT, padx=5)
-        self.loop_count_entry = tb.Entry(self.loop_count_frame)
+        self.loop_count_entry = tb.Entry(self.top_button_frame, width=3)
         self.loop_count_entry.insert(0, str(self.loop_count))
-        self.loop_count_entry.pack(side=tk.LEFT, padx=5)
+        self.loop_count_entry.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=0)
+        self.loop_count_label = tb.Label(self.top_button_frame, text="次")
+        self.loop_count_label.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=0)
 
         # 区域M：勾选框区域
         self.region_m = tb.Frame(self.region_l)
-        self.region_m.pack(fill=tk.X, padx=2, pady=2)
+        self.region_m.pack(fill=tk.X, padx=2, pady=0)
 
         # 默认运行中隐藏
         self.allow_minimize_var = tk.BooleanVar(value=True)
@@ -266,7 +296,7 @@ class ImageRecognitionApp:
             bootstyle="toolbutton",
             command=self.toggle_allow_minimize
         )
-        self.allow_minimize_checkbox.pack(side=tk.LEFT, pady=5)
+        self.allow_minimize_checkbox.pack(side=tk.LEFT, expand=True, fill=tk.X, pady=5)
 
         # 窗口置顶
         self.follow_step_checkbox = tb.Checkbutton(
@@ -276,12 +306,11 @@ class ImageRecognitionApp:
             bootstyle="toolbutton",
             command=self.toggle_topmost
         )
-        self.follow_step_checkbox.pack(side=tk.LEFT, pady=5)
-
+        self.follow_step_checkbox.pack(side=tk.LEFT, expand=True, fill=tk.X, pady=5)
 
         # 仅键盘操作勾选框
-        self.only_keyboard_checkbox = tb.Checkbutton(self.region_m, text="仅键盘操作", variable=self.only_keyboard_var, bootstyle=TOOLBUTTON)
-        self.only_keyboard_checkbox.pack(side=tk.LEFT, pady=5)
+        # self.only_keyboard_checkbox = tb.Checkbutton(self.region_m, text="仅键盘操作", variable=self.only_keyboard_var, bootstyle=TOOLBUTTON)
+        # self.only_keyboard_checkbox.pack(side=tk.LEFT, pady=5)
 
         # 区域B：树形区域
         self.region_b = tb.Frame(self.region_l)
@@ -321,6 +350,35 @@ class ImageRecognitionApp:
         self.tree.column("条件2", width=75, anchor='center')
         self.tree.column("需跳转2", width=75, anchor='center')
         self.tree.column("需禁用2", width=75, anchor='center')
+
+        # 1. 在 Treeview 上配置一个 hover 标签的样式
+        self.tree.tag_configure('hover', background="#f3f3f3")  
+
+        # 2. 用来记录上一次悬停的行
+        self._prev_hover_row = None
+
+        def safe_clear_tag(row_id):
+            # 先确认该 item 还在 Treeview 里
+            if row_id and self.tree.exists(row_id):
+                self.tree.item(row_id, tags=())
+
+        def on_motion(event):
+            row_id = self.tree.identify_row(event.y)
+            if row_id != self._prev_hover_row:
+                # 清除之前行的 hover
+                safe_clear_tag(self._prev_hover_row)
+                # 给新行加 hover
+                if row_id:
+                    self.tree.item(row_id, tags=('hover',))
+                self._prev_hover_row = row_id
+
+        def on_leave2(event):
+            # 鼠标移出时也清一次
+            safe_clear_tag(self._prev_hover_row)
+            self._prev_hover_row = None
+
+        self.tree.bind('<Motion>', on_motion)
+        self.tree.bind('<Leave>', on_leave2)
 
         #显示的列
         self.tree.configure(displaycolumns=["步骤名称", "延时ms"])
@@ -1761,7 +1819,7 @@ class ImageRecognitionApp:
         
         if not self.running:
             if not self.image_list:
-                messagebox.showwarning("提示", "列表中无步骤，【截取图片】【加载步骤】【导入步骤】可添加步骤")
+                messagebox.showwarning("提示", "列表中无步骤，【截取图片】【加载配置】【导入配置】可添加步骤")
                 return  # 直接返回，不执行后续代码
             if self.from_step:
                 selected_items = self.tree.selection()
@@ -2536,7 +2594,8 @@ class ImageRecognitionApp:
                 self.image_list[selected_index] = (
                     selected_image[0], selected_image[1], selected_image[2],
                     selected_image[3], mouse_action, selected_image[5],
-                    selected_image[6], selected_image[7], selected_image[8], selected_image[9], mouse_action_result
+                    selected_image[6], selected_image[7], selected_image[8], selected_image[9], mouse_action_result, selected_image[11],
+                    selected_image[12], selected_image[13]
                 )
                 
                 self.update_image_listbox()
@@ -4583,7 +4642,7 @@ class ImageRecognitionApp:
 
             try:
                 # 确保 selected_image 列表长度至少为 14（索引 0 到 13）
-                while len(selected_image) < 12:
+                while len(selected_image) < 14:
                     selected_image.append("")
 
                 # 将用户选择写回对应位置
@@ -4650,22 +4709,32 @@ class ImageRecognitionApp:
         w_based_on_h = int(req_h * ratio_w / ratio_h)
 
         # 选择能包下所有控件的最小方案
-        # 如果 h_based_on_w >= req_h，就用 (req_w, h_based_on_w)，否则用 (w_based_on_h, req_h)
         if h_based_on_w >= req_h:
-            new_w, new_h = req_w, h_based_on_w
+            base_w, base_h = req_w, h_based_on_w
         else:
-            new_w, new_h = w_based_on_h, req_h
+            base_w, base_h = w_based_on_h, req_h
+
+        # 仅对水平边距应用最小边距
+        min_margin = 5  # 单侧最小水平边距
+        # 如果当前左右边距 < min_margin，则增补；否则保持按比例计算宽度
+        if base_w - req_w < 2 * min_margin:
+            final_w = req_w + 2 * min_margin
+        else:
+            final_w = base_w
+
+        # 垂直方向使用按比例计算的高度，无最小边距限制
+        final_h = base_h
 
         # 计算居中位置
         main_x = self.root.winfo_x()
         main_y = self.root.winfo_y()
         main_w = self.root.winfo_width()
         main_h = self.root.winfo_height()
-        x = main_x + (main_w - new_w) // 2
-        y = main_y + (main_h - new_h) // 2
+        x = main_x + (main_w - final_w) // 2
+        y = main_y + (main_h - final_h) // 2
 
         # 一次性设置大小和位置，并显示
-        dialog.geometry(f"{new_w}x{new_h}+{x}+{y}")
+        dialog.geometry(f"{final_w}x{final_h}+{x}+{y}")
         dialog.deiconify()
         dialog.iconbitmap("icon/app.ico")  # 设置窗口图标
 
