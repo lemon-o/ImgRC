@@ -2839,14 +2839,14 @@ class ImageRecognitionApp:
         apply_btn = ttk.Button(
             btn_frame,
             text="应用于更多步骤",
-            command=select_steps,      # 你的处理函数
+            command=select_steps,  # 你的处理函数
             bootstyle="primary-outline"
         )
-        apply_btn.grid(row=0, column=0, padx=5, pady=5)
+        apply_btn.grid(row=0, column=0, padx=5, pady=5, sticky="ew")  # 关键：sticky="ew" 让按钮填满宽度
 
         # 第二行：一个子Frame，承载“取消”“保存”两个按钮
         sub_frame = tk.Frame(btn_frame)
-        sub_frame.grid(row=1, column=0, pady=5)
+        sub_frame.grid(row=1, column=0, pady=5, sticky="ew")  # 关键：sticky="ew" 让子Frame填满宽度
 
         cancel_btn = ttk.Button(
             sub_frame,
@@ -2854,7 +2854,7 @@ class ImageRecognitionApp:
             command=dialog.destroy,
             bootstyle="primary-outline"
         )
-        cancel_btn.pack(side=tk.LEFT, padx=5)
+        cancel_btn.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)  # 关键：expand=True 让按钮平分宽度
 
         save_btn = ttk.Button(
             sub_frame,
@@ -2862,7 +2862,9 @@ class ImageRecognitionApp:
             command=on_save,
             bootstyle="primary-outline"
         )
-        save_btn.pack(side=tk.LEFT, padx=5)
+        save_btn.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)  # 关键：expand=True 让按钮平分宽度
+
+        # 关键：让 btn_frame 的列0自动扩展
         btn_frame.grid_columnconfigure(0, weight=1)
 
         # 让 Tkinter 计算理想大小
@@ -4436,6 +4438,11 @@ class ImageRecognitionApp:
             # 一次性设置大小和位置，并显示
             dialog.geometry(f"{w}x{h}+{x}+{y}")
             dialog.deiconify()
+
+            # 默认选中所有文本
+            entry.select_range(0, tk.END)  # 选中所有文本
+            entry.icursor(tk.END)         # 将光标放在末尾（可选）
+            entry.focus_set()             # 确保输入框获得焦点
 
             dialog.iconbitmap("icon/app.ico")
    
