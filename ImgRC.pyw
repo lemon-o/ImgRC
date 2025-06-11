@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import tkinter as tk
@@ -31,7 +32,7 @@ import tkinter.font as tkfont
 import requests
 from packaging import version
 
-CURRENT_VERSION = "v1.1.3" #版本号
+CURRENT_VERSION = "v1.1.4" #版本号
 
 def run_as_admin():
     if ctypes.windll.shell32.IsUserAnAdmin():
@@ -70,7 +71,8 @@ class ImageRecognitionApp:
         self.canvas = None
         self.running = False  # 控制脚本是否在运行
         self.thread = None  # 用于保存线程
-        self.hotkey = '<F9>'  # 默认热键
+        self.hotkey = '<F9>'  # 开始/停止热键
+        self.screenshot_hotkey = "F8"    # 固定截图热键
         self.similarity_threshold = 0.8  # 默认相似度阈值
         self.delay_time = 0.1  # 默认延迟时间
         self.loop_count = 1  # 默认循环次数
@@ -254,7 +256,7 @@ class ImageRecognitionApp:
             bootstyle="primary-outline"
         )
         self.screenshot_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
-        ToolTip(self.screenshot_button, "截取图片以添加步骤")
+        ToolTip(self.screenshot_button, "截取图片以添加步骤(F8)")
         self.screenshot_button.bind(
             "<Enter>",
             lambda e: on_enter(e, self.screenshot_button, self.hover_icons["add"]), add="+"    
@@ -1294,40 +1296,73 @@ class ImageRecognitionApp:
 
     def register_global_hotkey(self):
         try:
-            def hotkey_callback():
-                self.root.after(0, self.toggle_script)  # 使用 after 在主线程中调用
-             
-            # 解析热键字符串
-            hotkey_str = self.hotkey.replace('<', '').replace('>', '').lower()
-            keyboard.add_hotkey(hotkey_str, hotkey_callback)
+            # 注册主功能热键
+            def main_hotkey_callback():
+                self.root.after(0, self.toggle_script)
+                
+            main_hotkey_str = self.hotkey.replace('<', '').replace('>', '').lower()
+            keyboard.add_hotkey(main_hotkey_str, main_hotkey_callback)
             
-            print(f"-------------------------------------------------------------------------------------")
-            logging.info(f"-------------------------------------------------------------------------------------")             
-            print(f"全局热键已注册：{self.hotkey}")
-            logging.info(f"程序启动")
+            # 注册截图热键（新增）
+            def screenshot_hotkey_callback():
+                self.root.after(0, self.prepare_capture_screenshot)
+                
+            keyboard.add_hotkey(self.screenshot_hotkey, screenshot_hotkey_callback)
+            
+            # 日志记录
+            print("-" * 85)
+            logging.info("-" * 85)
+            print(f"主功能热键已注册：{self.hotkey}")
+            print(f"截图热键已注册：{self.screenshot_hotkey}")
+            logging.info("程序启动 - 热键注册完成")
+            
         except Exception as e:
             print(f"注册热键失败: {e}")
- 
+            logging.error(f"热键注册失败: {e}")
+
     def unregister_global_hotkey(self):
         try:
-           hotkey_str = self.hotkey.replace('<', '').replace('>', '').lower()
-           keyboard.remove_hotkey(hotkey_str)
-           print(f"全局热键已注销：{self.hotkey}")
+            # 注销主热键
+            main_hotkey_str = self.hotkey.replace('<', '').replace('>', '').lower()
+            keyboard.remove_hotkey(main_hotkey_str)
+            
+            # 注销截图热键（新增）
+            keyboard.remove_hotkey(self.screenshot_hotkey)
+            
+            print(f"主功能热键已注销：{self.hotkey}")
+            print(f"截图热键已注销：{self.screenshot_hotkey}")
+            
         except Exception as e:
-           print(f"注销全局热键出错：{e}")
+            print(f"注销全局热键出错：{e}")
+            logging.error(f"热键注销失败: {e}")
  
-    def prepare_capture_screenshot(self):
+    def prepare_capture_screenshot(self, event=None):
+        # 如果 self.top 已存在且窗口未关闭，则直接返回或销毁旧窗口
+        if hasattr(self, 'top') and self.top:
+            try:
+                # 检查窗口是否仍然有效
+                if self.top.winfo_exists():
+                    # 方案1：直接返回，不创建新窗口
+                    # return
+                    
+                    # 方案2：销毁旧窗口，创建新窗口
+                    self.top.destroy()
+            except tk.TclError:
+                # 如果窗口已被手动关闭，清除引用
+                self.top = None
+
         # 捕获全屏快照
-        screenshot = ImageGrab.grab()  # 全屏捕获
-        self.full_screen_image = screenshot  # 保存原始快照，后续用于局部处理
+        screenshot = ImageGrab.grab()
+        self.full_screen_image = screenshot
         self.screenshot_photo = ImageTk.PhotoImage(screenshot)
+
         # 计算新的步骤编号
         existing_steps = set()
         for item in self.image_list:
             step_name = item[1]
             if step_name.startswith("步骤"):
                 try:
-                    num = int(step_name[2:])  # 提取"步骤"后面的数字
+                    num = int(step_name[2:])
                     existing_steps.add(num)
                 except ValueError:
                     continue
@@ -1336,27 +1371,47 @@ class ImageRecognitionApp:
             new_step_num += 1
         self._next_step_num = new_step_num
 
-        # 创建一个全屏窗口用于显示快照
+        # 创建全屏窗口
         self.top = tk.Toplevel(self.root)
         self.top.attributes('-fullscreen', True)
-        self.top.focus_force()  # 确保窗口获取焦点
+        self.top.attributes('-topmost', True)
+        self.top.focus_force()
         self.top.bind("<Escape>", self.exit_screenshot_mode)
-        print("Esc 绑定成功")  # Debug 信息
 
-        # 在窗口上创建 Canvas，并在 Canvas 中显示快照图片
-        self.canvas = tk.Canvas(self.top, cursor="cross")
+        # 初始化 Canvas
+        self.canvas = tk.Canvas(self.top, cursor="crosshair")
         self.canvas.pack(fill=tk.BOTH, expand=True)
-        # 保存创建的图像项标识符，用于后续更新显示
         self.image_id = self.canvas.create_image(0, 0, anchor=tk.NW, image=self.screenshot_photo)
 
-        # 初始化鼠标拖动相关的属性
+        # 绑定鼠标事件...
         self.rect = None
         self.overlay_rects = []
-        
-        # 绑定鼠标事件，用于在快照上选择区域
         self.canvas.bind("<ButtonPress-1>", self.on_button_press)
         self.canvas.bind("<B1-Motion>", self.on_mouse_drag)
         self.canvas.bind("<ButtonRelease-1>", self.on_button_release)
+
+        # 窗口关闭时清理引用
+        self.top.protocol("WM_DELETE_WINDOW", self.cleanup_screenshot_window)
+
+        # 在窗口呈现后，延迟执行一次自动点击
+        self.top.after(100, self._auto_click_current_position)  # 设置延迟 100 毫秒
+        self.top.after(1000, self._auto_click_current_position)
+        self.top.after(2000, self._auto_click_current_position)
+
+    def _auto_click_current_position(self):
+        try:
+            # 获取当前鼠标位置（全局屏幕坐标）
+            x, y = pyautogui.position()
+            # 执行左键点击
+            pyautogui.click(x, y)
+        except Exception as e:
+            print(f"自动点击失败: {e}")
+
+    def cleanup_screenshot_window(self):
+        """清理截图窗口引用"""
+        if hasattr(self, 'top') and self.top:
+            self.top.destroy()
+        self.top = None
                 
     def exit_screenshot_mode(self, event=None):
         """退出截图模式，关闭透明窗口，恢复主窗口"""
@@ -1419,9 +1474,24 @@ class ImageRecognitionApp:
 
     def on_button_release(self, event):
         # 记录终点坐标
-        end_x = event.x
-        end_y = event.y
-
+        end_x, end_y = event.x, event.y
+        dx = abs(end_x - self.start_x)
+        dy = abs(end_y - self.start_y)
+        threshold = 5  # 像素阈值，小于此值视为点击，不绘制
+        # 如果设置了跳过标志，或者尺寸太小，则删除 rect 并返回
+        if getattr(self, 'skip_next_draw', False):
+            # 跳过本次绘制
+            self.skip_next_draw = False
+            if hasattr(self, 'rect') and self.rect:
+                self.canvas.delete(self.rect)
+                self.rect = None
+            return
+        if dx < threshold and dy < threshold:
+            # 尺寸过小，删除刚创建的零尺寸矩形
+            if hasattr(self, 'rect') and self.rect:
+                self.canvas.delete(self.rect)
+                self.rect = None
+            return
         # 删除覆盖层，释放画布
         for item in self.overlay_rects:
             self.canvas.delete(item)
@@ -1429,12 +1499,20 @@ class ImageRecognitionApp:
 
         # 获取截图区域，不包括矩形框
         border_offset = 2  # 让截图区域比矩形框内缩 2 像素
-        bbox = (
-            min(self.start_x, end_x) + border_offset, 
-            min(self.start_y, end_y) + border_offset, 
-            max(self.start_x, end_x) - border_offset, 
-            max(self.start_y, end_y) - border_offset
-        )
+        
+        # 确保 left <= right 和 top <= bottom
+        left = min(self.start_x, end_x) + border_offset
+        right = max(self.start_x, end_x) - border_offset
+        top = min(self.start_y, end_y) + border_offset
+        bottom = max(self.start_y, end_y) - border_offset
+
+        # 检查是否有效区域（防止宽度或高度为负数）
+        if right <= left or bottom <= top:
+            print("无效截图区域：宽度或高度为 0")
+            return
+
+        # 转换为整数（PIL 需要整数坐标）
+        bbox = (int(left), int(top), int(right), int(bottom))
             
         # 使用规则 "截图（时间）.png" 命名截图文件避免重复
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")  # 生成时间戳
@@ -1573,9 +1651,8 @@ class ImageRecognitionApp:
 
         self.update_image_listbox()  # 更新详细信息
 
-        # 关闭全屏透明窗口
-        self.top.destroy()
-        self.root.deiconify()
+        self.top.destroy()       # 关闭全屏透明窗口
+        self.root.deiconify()  # 重新显示窗口
 
         # 确保 tree 更新完成后再选择最新项目
         all_items = self.tree.get_children()
@@ -3990,30 +4067,32 @@ class ImageRecognitionApp:
     def create_image_copy(self, original_path):
         """
         在原文件同目录下复制一份图像文件。
-        如果已经存在 name_copy.ext，则依次尝试 name_copy2.ext、name_copy3.ext ... 直到不冲突。
+        逻辑：
+        - 如果文件名末尾形如 base_数字，则提取 base 作为基础名；
+        - 否则完整保留原始文件名作为基础名；
+        - 然后从 _1 开始尝试（base_1.ext），若已存在则依次 base_2.ext、base_3.ext ... 直到不冲突。
         返回新文件的完整路径。
         """
         dirname = os.path.dirname(original_path)
         base_name = os.path.basename(original_path)
         name, ext = os.path.splitext(base_name)
 
-        # 如果原始文件名已经包含 _copy + 数字，则提取原始名称
-        import re
-        match = re.match(r"^(.*?)(_copy\d*)?$", name)
-        if match:
-            name = match.group(1)  # 只保留原始名称部分
+        # 仅当文件名末尾有下划线加数字时，提取出基础名
+        # 例如 name_3 -> group(1)=name；否则（如 "20250611184011" 或 "image"）都保持原 name
+        m = re.match(r"^(.*)_(\d+)$", name)
+        if m:
+            base = m.group(1)
+        else:
+            base = name
 
-        # 尝试基本的 _copy 后缀
-        suffix = "_copy"
-        new_name = f"{name}{suffix}{ext}"
+        # 从 1 开始尝试 _1 后缀
+        count = 1
+        new_name = f"{base}_{count}{ext}"
         new_path = os.path.join(dirname, new_name)
-
-        # 如果已存在，就循环尝试带数字的后缀
-        count = 2
         while os.path.exists(new_path):
-            new_name = f"{name}{suffix}{count}{ext}"
-            new_path = os.path.join(dirname, new_name)
             count += 1
+            new_name = f"{base}_{count}{ext}"
+            new_path = os.path.join(dirname, new_name)
 
         shutil.copy2(original_path, new_path)
         return new_path
