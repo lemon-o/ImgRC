@@ -78,6 +78,7 @@ class ImageRecognitionApp:
         self.similarity_threshold = 0.8  # 默认相似度阈值
         self.delay_time = 0.1  # 默认延迟时间
         self.loop_count = 1  # 默认循环次数
+        self.retry_count = 0 #重新匹配初始计数
         self.screenshot_folder = 'screenshots'  # 截图保存文件夹
         self.last_used_config = "last_config.json"  # 用于存储最后使用的配置文件名
         self.paused = False  # 控制脚本是否暂停
@@ -2279,9 +2280,16 @@ class ImageRecognitionApp:
                             print(f"{disable_target_2} 已被禁用")
 
                 index += 1
+                self.retry_count = 0
                 print(f"【{self.current_step_name}】执行完毕")
                 logging.info(f"【{self.current_step_name}】执行完毕")
+
             self.current_loop += 1
+            remain_times = self.loop_count - self.current_loop
+            if remain_times > 0:
+                self.loop_count_entry.delete(0, "end")  # 清空当前内容
+                self.loop_count_entry.insert(0, str(remain_times)) 
+
         self.restore_disabled_steps()
         self.running = False
         self.root.after(0, self.update_ui_after_stop)
@@ -2328,12 +2336,16 @@ class ImageRecognitionApp:
             time.sleep(wait_time / 1000.0)
             if os.path.exists(img_path):
                 match_result = self.match_and_click(img_path, similarity_threshold)
+                self.retry_count += 1
+                print(f"重试次数{self.retry_count}")
+                logging.info(f"重试次数{self.retry_count}")
         return match_result
    
     def stop_script(self):
         if self.thread is not None:
             # 设置停止标志（如果线程支持）
             self.running = False
+            self.retry_count = 0
             
             if self.thread.is_alive():
                 # 强制终止线程（不推荐，但可用）
@@ -2410,6 +2422,8 @@ class ImageRecognitionApp:
             similarity_threshold = current_step[2] #获取相似度
             # 从selected_items[14]获取识别范围，并取"|"分隔的第一段
             recognition_area = current_step[14].split("|")[0] if len(current_step) > 14 else fullscreen_coodrs
+            area_choice_value = current_step[14].split("|")[1] if len(current_step) > 14 else 'fullscreen'
+            img_area = current_step[14].split("|")[2] if len(current_step) > 14 else fullscreen_coodrs
 
         # 获取屏幕截图
         screenshot = pyautogui.screenshot()
@@ -2445,7 +2459,53 @@ class ImageRecognitionApp:
         # 执行模板匹配
         result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
         min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
-    
+
+        # 检查是否匹配成功
+        if self.retry_count == 1:
+            if max_val < similarity_threshold:
+                print(f"【{step_name}】，匹配失败，相似度：{max_val:.3f}，阈值：{similarity_threshold}")
+                logging.info(f"【{step_name}】，匹配失败，相似度：{max_val:.3f}，阈值：{similarity_threshold}")
+
+                # 若当前是 screenshot 区域识图，则尝试一次全屏匹配
+                if area_choice_value == 'screenshot':
+                    print(f"【{step_name}】，尝试全屏重新匹配")
+                    # 获取全屏截图
+                    full_screenshot = pyautogui.screenshot()
+                    full_screenshot = cv2.cvtColor(np.array(full_screenshot), cv2.COLOR_RGB2BGR)
+
+                    # 执行全屏匹配
+                    result_full = cv2.matchTemplate(full_screenshot, template, cv2.TM_CCOEFF_NORMED)
+                    _, max_val_full, _, max_loc_full = cv2.minMaxLoc(result_full)
+
+                    if max_val_full >= similarity_threshold:
+                        print(f"【{step_name}】，全屏匹配成功，相似度：{max_val_full:.3f}")
+                        logging.info(f"【{step_name}】，全屏匹配成功，相似度：{max_val_full:.3f}")
+                        # 根据模板大小计算匹配区域
+                        th, tw = template.shape[:2]
+                        x1_new, y1_new = max_loc_full
+                        x2_new, y2_new = x1_new + tw, y1_new + th
+                        # 更新识别区域
+                        recognition_area = f"{x1_new},{y1_new},{x2_new},{y2_new}"
+                        img_area = recognition_area
+                        new_area_str = f"{recognition_area}|{area_choice_value}|{img_area}"
+                        # 用元组方式更新 self.image_list 中的对应项
+                        new_image = list(current_step)
+                        new_image[14] = new_area_str
+                        step_name = new_image[1]
+                        self.image_list[selected_index] = tuple(new_image)  
+
+                        print(f"【{step_name}】识图区域更新为({img_area})")
+                        logging.info(f"【{step_name}】识图区域更新为({img_area})")
+
+                        self.update_image_listbox()
+
+                    else:
+                        print(f"【{step_name}】，全屏匹配依然失败，相似度：{max_val_full:.3f}")
+                        logging.info(f"【{step_name}】，全屏匹配依然失败，相似度：{max_val_full:.3f}")
+                        return  # 或 raise 错误
+                else:
+                    return  # 如果不是 screenshot 模式，直接退出或提示失败
+
         # 如果相似度超过阈值
         if max_val >= similarity_threshold:
             # 先处理鼠标点击、滚轮操作等
