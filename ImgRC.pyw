@@ -1472,7 +1472,7 @@ class ImageRecognitionApp:
                 parts = [p.strip() for p in raw.split("|")]
                 coords = parts[0]
                 area_choice = parts[1]
-                mapped = {"screenshot": "步骤图片", "manual": "自定义"}.get(area_choice, "全屏")
+                mapped = {"update": "待更新","screenshot": "步骤图片", "manual": "自定义"}.get(area_choice, "全屏")
                 raw = f"{mapped}".strip()
 
                 lbl = self.labels[字段名]
@@ -2424,11 +2424,6 @@ class ImageRecognitionApp:
             recognition_area = current_step[14].split("|")[0] if len(current_step) > 14 else fullscreen_coodrs
             area_choice_value = current_step[14].split("|")[1] if len(current_step) > 14 else 'fullscreen'
             img_area = current_step[14].split("|")[2] if len(current_step) > 14 else fullscreen_coodrs
-
-        # 获取屏幕截图
-        screenshot = pyautogui.screenshot()
-        screenshot = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
-
         # 检查模板图像是否存在
         if not os.path.exists(template_path):
             raise FileNotFoundError(f"【{step_name}】，找不到模板图像：{template_path}")
@@ -2442,72 +2437,72 @@ class ImageRecognitionApp:
 
         # 如果有识别范围，则截取指定区域的屏幕图像进行匹配
         if recognition_area:
-            try:
-                # 假设识别范围格式为 "x1,y1,x2,y2"
-                x1, y1, x2, y2 = map(int, recognition_area.split(","))
-                # 确保坐标在合理范围内
-                x1 = max(0, x1)
-                y1 = max(0, y1)
-                x2 = min(screenshot.shape[1], x2)
-                y2 = min(screenshot.shape[0], y2)
-                # 截取指定区域
-                screenshot = screenshot[y1:y2, x1:x2]
-            except Exception as e:
-                print(f"【{step_name}】，识别范围格式错误：{recognition_area}，错误：{str(e)}")
-                # 如果识别范围格式错误，则使用全屏匹配
+            # 获取屏幕截图
+            screenshot = pyautogui.screenshot()
+            screenshot = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
+            
+            if area_choice_value not in ('fullscreen', 'update'):
+                try:
+                    x1, y1, x2, y2 = map(int, recognition_area.split(","))
+                    # 确保坐标在合理范围内
+                    x1 = max(0, x1)
+                    y1 = max(0, y1)
+                    x2 = min(screenshot.shape[1], x2)
+                    y2 = min(screenshot.shape[0], y2)
+                    # 截取指定区域
+                    screenshot = screenshot[y1:y2, x1:x2]
+                except Exception as e:
+                    print(f"【{step_name}】，识别范围格式错误：{recognition_area}，错误：{str(e)}")
+                    # 如果识别范围格式错误，则使用全屏匹配
 
-        # 执行模板匹配
-        result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
-        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+            # 执行模板匹配
+            result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
+            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
 
-        # 检查是否匹配成功
-        if self.retry_count == 1:
-            if max_val < similarity_threshold:
-                print(f"【{step_name}】，匹配失败，相似度：{max_val:.3f}，阈值：{similarity_threshold}")
-                logging.info(f"【{step_name}】，匹配失败，相似度：{max_val:.3f}，阈值：{similarity_threshold}")
-
-                # 若当前是 screenshot 区域识图，则尝试一次全屏匹配
-                if area_choice_value == 'screenshot':
-                    print(f"【{step_name}】，尝试全屏重新匹配")
-                    # 获取全屏截图
-                    full_screenshot = pyautogui.screenshot()
-                    full_screenshot = cv2.cvtColor(np.array(full_screenshot), cv2.COLOR_RGB2BGR)
-
-                    # 执行全屏匹配
-                    result_full = cv2.matchTemplate(full_screenshot, template, cv2.TM_CCOEFF_NORMED)
-                    _, max_val_full, _, max_loc_full = cv2.minMaxLoc(result_full)
-
-                    if max_val_full >= similarity_threshold:
-                        print(f"【{step_name}】，全屏匹配成功，相似度：{max_val_full:.3f}")
-                        logging.info(f"【{step_name}】，全屏匹配成功，相似度：{max_val_full:.3f}")
-                        # 根据模板大小计算匹配区域
-                        th, tw = template.shape[:2]
-                        x1_new, y1_new = max_loc_full
-                        x2_new, y2_new = x1_new + tw, y1_new + th
-                        # 更新识别区域
-                        recognition_area = f"{x1_new},{y1_new},{x2_new},{y2_new}"
-                        img_area = recognition_area
-                        new_area_str = f"{recognition_area}|{area_choice_value}|{img_area}"
-                        # 用元组方式更新 self.image_list 中的对应项
-                        new_image = list(current_step)
-                        new_image[14] = new_area_str
-                        step_name = new_image[1]
-                        self.image_list[selected_index] = tuple(new_image)  
-
-                        print(f"【{step_name}】识图区域更新为({img_area})")
-                        logging.info(f"【{step_name}】识图区域更新为({img_area})")
-
-                        self.update_image_listbox()
-
-                    else:
-                        print(f"【{step_name}】，全屏匹配依然失败，相似度：{max_val_full:.3f}")
-                        logging.info(f"【{step_name}】，全屏匹配依然失败，相似度：{max_val_full:.3f}")
-                        return  # 或 raise 错误
-                else:
-                    return  # 如果不是 screenshot 模式，直接退出或提示失败
-
-        # 如果相似度超过阈值
         if max_val >= similarity_threshold:
+
+            if area_choice_value == 'update':
+                locations = np.where(result >= similarity_threshold)
+                match_points = list(zip(*locations[::-1]))  # 转为 [(x, y), (x, y), ...]
+
+                if match_points:
+                    print(f"【{step_name}】，全屏匹配到 {len(match_points)} 处")
+                    logging.info(f"【{step_name}】，全屏匹配到 {len(match_points)} 处")
+                    if len(match_points) > 1:
+                        print(f"【{step_name}】，已合并匹配到的区域")
+                        logging.info(f"【{step_name}】，已合并匹配到的区域")
+
+                    # 模板尺寸
+                    th, tw = template.shape[:2]
+
+                    # 合并所有匹配区域
+                    x1_all = min([pt[0] for pt in match_points])
+                    y1_all = min([pt[1] for pt in match_points])
+                    x2_all = max([pt[0] + tw for pt in match_points])
+                    y2_all = max([pt[1] + th for pt in match_points])
+
+                    # 向四周扩展 20 像素，限制边界不越界
+                    x1_new = max(0, x1_all - 20)
+                    y1_new = max(0, y1_all - 20)
+                    x2_new = min(screenshot.shape[1], x2_all + 20)
+                    y2_new = min(screenshot.shape[0], y2_all + 20)
+
+                    recognition_area = f"{x1_new},{y1_new},{x2_new},{y2_new}"
+                    img_area = recognition_area
+                    area_choice_value = 'screenshot'
+                    new_area_str = f"{recognition_area}|{area_choice_value}|{img_area}"
+
+                    # 更新当前步骤的识别区域
+                    new_image = list(current_step)
+                    new_image[14] = new_area_str
+                    step_name = new_image[1]
+                    self.image_list[selected_index] = tuple(new_image)
+                
+                self.update_image_listbox()
+
+                print(f"【{step_name}】识图区域更新为({img_area})")
+                logging.info(f"【{step_name}】识图区域更新为({img_area})")
+            
             # 先处理鼠标点击、滚轮操作等
             if mouse_coordinates and not self.only_keyboard_var.get():
                 try:
@@ -3764,6 +3759,7 @@ class ImageRecognitionApp:
         self.load_selected_config()
 
     def load_selected_config(self):
+        step_count = 0
         global selected_config
         try:  
             if self.import_and_load:
@@ -3824,7 +3820,7 @@ class ImageRecognitionApp:
             # 清空并重新填充 Treeview
             for item in self.tree.get_children():
                 self.tree.delete(item)
-
+                
             for i, img_data in enumerate(self.image_list):
                 # 确保每个项目都有全部索引的数量
                 if len(img_data) < 15: #新增索引
@@ -3891,14 +3887,10 @@ class ImageRecognitionApp:
                     bottom = min(screen_h, bottom)
 
                     img_coords = f"{left},{top},{right},{bottom}" 
-                    img_data[14] = f"0,0,{screen_w},{screen_h}|fullscreen|{img_coords}"
+                    img_data[14] = f"0,0,{screen_w},{screen_h}|update|{img_coords}"
                     self.image_list[i] = img_data  # 更新列表
-
-                if not img_data[14]:  # 如果为空
-                    screen_w = self.root.winfo_screenwidth()
-                    screen_h = self.root.winfo_screenheight()
-                    img_data[14] = f"0,0,{screen_w},{screen_h}|fullscreen|0,0,{screen_w},{screen_h}"  # 补全为全屏+fullscreen
-                    self.image_list[i] = img_data  # 更新原列表
+                    if step_count == 0:
+                        messagebox.showinfo("提示", f"检测到旧版本配置文件\n首次运行步骤将更新识图区域，此时运行速度较慢\n所有步骤更新完识图区域后，运行速度将大幅提升！")
 
                 # 加载图像并创建缩略图
                 try:
@@ -3917,6 +3909,7 @@ class ImageRecognitionApp:
                         image=photo
                     )
                     self.tree.image_refs.append(photo)
+                    step_count += 1
                 except Exception as e:
                     print(f"处理图像时出错 {img_data[0]}: {e}")
                     logging.error(f"处理图像时出错 {img_data[0]}: {e}")
@@ -3931,8 +3924,8 @@ class ImageRecognitionApp:
             self.register_global_hotkey()
             self.update_image_listbox()
             
-            print(f"配置已从 {self.config_filename} 加载")
-            logging.info(f"配置已从 {self.config_filename} 加载")
+            print(f"已从 {self.config_filename} 加载{step_count}个步骤")
+            logging.info(f"已从 {self.config_filename} 加载{step_count}个步骤")
             
             # 显示成功消息
             # messagebox.showinfo("成功", f"配置已成功加载:\n{self.config_filename}", parent=self.root)
@@ -4818,7 +4811,7 @@ class ImageRecognitionApp:
         if not self.running:
             self.toggle_script()  
         else:
-            messagebox.showinfo("提示", "请先点击【停止运行】")
+            messagebox.showinfo("提示", "请先点击【停止运行(F9)】")
 
     def open_image_location(self):
         selected_items = self.tree.selection() 
@@ -5327,6 +5320,14 @@ class ImageRecognitionApp:
             rb3.config(state="disabled")  # 禁用 Radiobutton
             btn_manual.config(state="disabled")  # 禁用 Button
             need_disable = False
+        
+        if area_choice_value == 'update':
+            messagebox.showinfo("提示", f"检测到旧版本的配置文件\n请先完整运行完一次所有步骤，才可设置识图区域")
+            rb1.config(state="disabled")
+            rb2.config(state="disabled")
+            rb3.config(state="disabled")
+            btn_manual.config(state="disabled")
+            btn_save.config(state="disabled")
 
         dialog.update_idletasks()
         w = dialog.winfo_reqwidth()
