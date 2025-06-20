@@ -39,12 +39,15 @@ CURRENT_VERSION = "v1.1.5" #版本号
 def run_as_admin():
     if ctypes.windll.shell32.IsUserAnAdmin():
         return  # 已经是管理员，直接运行
+    
+    messagebox.showinfo("提示", "请以管理员身份启动本程序\n\n1、右键程序图标→【属性】→【兼容性】\n2、勾选【以管理员身份运行此程序】→【确定】")
+    sys.exit()
 
-    # 重新以管理员身份启动
-    exe = sys.executable
-    params = " ".join(sys.argv)
-    ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, params, None, 1)
-    sys.exit()  # 退出当前进程，等待新进程执行
+    # # 重新以管理员身份启动
+    # exe = sys.executable
+    # params = " ".join(sys.argv)
+    # ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, params, None, 1)
+    # sys.exit()  # 退出当前进程，等待新进程执行
 
 run_as_admin()
 
@@ -5320,7 +5323,8 @@ class ImageRecognitionApp:
             rb3.config(state="disabled")  # 禁用 Radiobutton
             btn_manual.config(state="disabled")  # 禁用 Button
             need_disable = False
-        
+
+        old_coords, area_choice_value, img_coords = selected_image[14].split("|")       
         if area_choice_value == 'update':
             messagebox.showinfo("提示", f"检测到旧版本的配置文件\n请先完整运行完一次所有步骤，才可设置识图区域")
             rb1.config(state="disabled")
