@@ -34,7 +34,7 @@ from packaging import version
 import tkinter.font as tkFont
 from ttkbootstrap.widgets import Entry
 
-CURRENT_VERSION = "v1.1.5" #版本号
+CURRENT_VERSION = "v1.1.6" #版本号
 
 def run_as_admin():
     if ctypes.windll.shell32.IsUserAnAdmin():
