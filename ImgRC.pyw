@@ -34,7 +34,7 @@ from packaging import version
 import tkinter.font as tkFont
 from ttkbootstrap.widgets import Entry
 
-CURRENT_VERSION = "v1.1.6" #版本号
+CURRENT_VERSION = "v1.1.7" #版本号
 
 def run_as_admin():
     if ctypes.windll.shell32.IsUserAnAdmin():
@@ -2288,6 +2288,7 @@ class ImageRecognitionApp:
                 logging.info(f"【{self.current_step_name}】执行完毕")
 
             self.current_loop += 1
+            self.start_step_index = 0 
             remain_times = self.loop_count - self.current_loop
             if remain_times > 0:
                 self.loop_count_entry.delete(0, "end")  # 清空当前内容
@@ -6098,7 +6099,7 @@ class ImageRecognitionApp:
             text_frame,
             wrap=tk.WORD,
             yscrollcommand=scrollbar.set,
-            font=('Consolas', 10)
+            font=('Microsoft YaHei UI', 10)
         )
         log_text.pack(fill=tk.BOTH, expand=True)
         scrollbar.config(command=log_text.yview)
