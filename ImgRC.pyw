@@ -34,7 +34,7 @@ from packaging import version
 import tkinter.font as tkFont
 from ttkbootstrap.widgets import Entry
 
-CURRENT_VERSION = "v1.1.7" #版本号
+CURRENT_VERSION = "v1.1.8" #版本号
 
 def run_as_admin():
     if ctypes.windll.shell32.IsUserAnAdmin():
@@ -68,7 +68,7 @@ class ImageRecognitionApp:
         self.root = root
         self.root.title("ImgRC")
         self.style = tb.Style(theme='flatly')  # 选择一个主题
-        self.image_list = []  # 存储 (图像路径, 步骤名称, 相似度, 键盘动作, 坐标(F2), 延时ms, 条件, 需跳转，状态， 需禁用， 鼠标动作， 识图区域)
+        self.image_list = []  # 存储 (图像路径, 步骤名称, 相似度, 键盘动作, 点击位置(F2), 延时ms, 条件, 需跳转，状态， 需禁用， 鼠标动作， 识图区域)
         self.screenshot_area = None  # 用于存储截图区域
         self.rect = None  # 用于存储 Canvas 上的矩形
         self.start_x = None
@@ -76,8 +76,10 @@ class ImageRecognitionApp:
         self.canvas = None
         self.running = False  # 控制脚本是否在运行
         self.thread = None  # 用于保存线程
-        self.hotkey = '<F9>'  # 开始/停止热键
-        self.screenshot_hotkey = "F8"    # 固定截图热键
+        self.hotkey = 'F9'  # 开始/停止热键
+        self.screenshot_hotkey = "F8"    # 截图热键
+        self.change_coodr_hotkey = "F2"    # 更改点击坐标热键
+        self.retake_image_hotkey = "F4"    # 重新截图热键
         self.similarity_threshold = 0.8  # 默认相似度阈值
         self.delay_time = 0.1  # 默认延迟时间
         self.loop_count = 1  # 默认循环次数
@@ -100,6 +102,7 @@ class ImageRecognitionApp:
         self.is_dragging = False
         self.rc_area_change = False
         self.step_on_search = False
+        self.rc_area_dialog = False
         self.last_area_choice = 'screenshot'
 
         self.checking_update = False
@@ -177,6 +180,32 @@ class ImageRecognitionApp:
         # 在 region_a 中创建带边框的容器
         self.bordered_frame = tk.Frame(self.region_a)
         self.bordered_frame.pack(fill=tk.BOTH, padx=0, pady=0)
+
+        def on_region_a_enter(event):
+            if self.follow_current_step.get() and not self.rc_area_dialog:
+                # 鼠标进入 region_a，取消置顶
+                self.root.attributes('-topmost', False)
+
+        def on_region_a_leave(event):
+            if not self.follow_current_step.get() and not self.rc_area_dialog:
+                return
+
+            # region_a 的全局坐标和尺寸
+            x0 = self.region_a.winfo_rootx()
+            y0 = self.region_a.winfo_rooty()
+            x1 = x0 + self.region_a.winfo_width()
+            y1 = y0 + self.region_a.winfo_height()
+
+            # 鼠标当前全局坐标
+            mx, my = event.x_root, event.y_root
+
+            # 只有当鼠标真地跑到 region_a 的外面，才恢复置顶
+            if not (x0 <= mx <= x1 and y0 <= my <= y1):
+                self.root.attributes('-topmost', True)
+
+        # 绑定事件
+        self.region_a.bind("<Enter>", on_region_a_enter)
+        self.region_a.bind("<Leave>", on_region_a_leave)
 
         # 配置按钮行
         self.config_button_frame = ttk.Frame(self.bordered_frame)
@@ -423,14 +452,14 @@ class ImageRecognitionApp:
 
         # 使用 Treeview 来显示图片和延时ms
         self.tree = ttk.Treeview(self.region_b, columns=(
-            "图片名称", "步骤名称", "相似度", "键盘动作", "坐标(F2)", "延时ms", "条件", 
+            "图片名称", "步骤名称", "相似度", "键盘动作", "点击位置(F2)", "延时ms", "条件", 
             "需跳转", "状态", "需禁用", "鼠标动作", "条件2", "需跳转2", "需禁用2", "识图区域"
         ), show='headings')#新增索引
         self.tree.heading("图片名称", text="图片名称")
         self.tree.heading("步骤名称", text="步骤名称")
         self.tree.heading("相似度", text="相似度")
         self.tree.heading("键盘动作", text="键盘动作")
-        self.tree.heading("坐标(F2)", text="坐标(F2)")
+        self.tree.heading("点击位置(F2)", text="点击位置(F2)")
         self.tree.heading("延时ms", text="延时ms")
         self.tree.heading("条件", text="条件")
         self.tree.heading("需跳转", text="需跳转")
@@ -448,7 +477,7 @@ class ImageRecognitionApp:
         self.tree.column("步骤名称", width=75, anchor='center')
         self.tree.column("相似度", width=75, anchor='center')
         self.tree.column("键盘动作", width=75, anchor='center')
-        self.tree.column("坐标(F2)", width=75, anchor='center')
+        self.tree.column("点击位置(F2)", width=75, anchor='center')
         self.tree.column("延时ms", width=75, anchor='center')
         self.tree.column("条件", width=20, anchor='center')
         self.tree.column("需跳转", width=75, anchor='center')
@@ -535,7 +564,7 @@ class ImageRecognitionApp:
 
         # 区域C：图片预览区域（取消底部边距）
         self.region_c = tb.Frame(self.region_r, style="PreviewBg.TFrame")
-        self.region_c.pack(fill=tk.BOTH, padx=0, pady=(0, 0), expand=True)  # 关键修改
+        self.region_c.pack(fill=tk.BOTH, padx=0, pady=(0, 0), expand=True) 
 
         # 获取屏幕宽度并计算 1/5
         screen_width = self.root.winfo_screenwidth()  # 获取整个屏幕的宽度
@@ -574,6 +603,20 @@ class ImageRecognitionApp:
         self.region_d = tb.Frame(self.region_r, style="InnerR.TFrame")
         self.region_d.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))  
 
+        def on_region_d_enter(event):
+            if self.follow_current_step.get() and not self.rc_area_dialog:
+                # 鼠标进入 region_d，取消置顶
+                self.root.attributes('-topmost', False)
+
+        def on_region_d_leave(event):
+            if self.follow_current_step.get() and not self.rc_area_dialog:
+                # 鼠标离开 region_d，恢复置顶
+                self.root.attributes('-topmost', True)
+
+        # 绑定事件
+        self.region_d.bind("<Enter>", on_region_d_enter)
+        self.region_d.bind("<Leave>", on_region_d_leave)
+
         # 详细信息标签区域
         # —— 第一行：标题 + 文件名 —— #
         self.label_frame = tk.Frame(self.region_d)
@@ -611,7 +654,7 @@ class ImageRecognitionApp:
         self.labels = {}         # 右侧：字段值 Label
         self.label_titles = {}   # ✅ 左侧：字段名 Label
 
-        字段名列表 = ["图片名称", "识图区域", "条件判断", "相似度", "坐标(F2)", "键盘动作", "鼠标动作", "状态"]
+        字段名列表 = ["图片名称", "识图区域", "条件判断", "相似度", "点击位置(F2)", "键盘动作", "鼠标动作", "状态"]
 
         for name in 字段名列表:
             row_frame = tk.Frame(self.labels_frame)
@@ -644,12 +687,6 @@ class ImageRecognitionApp:
          
         # 绑定焦点事件
         self.tree.bind("<FocusIn>", self.update_label)
-
-        # 绑定 F2 键获取鼠标位置
-        self.root.bind('<F2>', self.get_mouse_position)  
-
-        # 绑定 F4 重新截图
-        self.root.bind('<F4>', self.retake_screenshot)  
 
         # 初始化上下文菜单
         self.tree.unbind('<Double-1>')
@@ -1431,16 +1468,18 @@ class ImageRecognitionApp:
             "识图区域": 14,
             "条件判断": [6, 7, 9, 11, 12, 13],
             "相似度": 2,
-            "坐标(F2)": 4,
+            "点击位置(F2)": 4,
             "键盘动作": 3,
             "鼠标动作": 10,
             "状态": 8
         }
 
         for 字段名, 索引 in 字段配置.items():
+            # 1. 先计算 raw
             if isinstance(索引, (list, tuple)):
                 if 字段名 == "条件判断":
                     parts = []
+                    # 前半部分条件
                     if len(values) > max(索引[:3]) and any(values[i] for i in 索引[:3]):
                         part1 = []
                         if values[索引[0]]:
@@ -1452,6 +1491,7 @@ class ImageRecognitionApp:
                             part1.append("需禁用")
                             part1.append(str(values[索引[2]]).strip())
                         parts.append(" ".join(part1))
+                    # 后半部分条件
                     if len(values) > max(索引[3:]) and any(values[i] for i in 索引[3:]):
                         part2 = []
                         if values[索引[3]]:
@@ -1463,61 +1503,108 @@ class ImageRecognitionApp:
                             part2.append("需禁用")
                             part2.append(str(values[索引[5]]).strip())
                         parts.append(" ".join(part2))
-                    raw = "；".join(parts) if parts else ""
+                    raw = "；".join(parts) if parts else "默认"
                 else:
                     raw_parts = [str(values[i]).replace("\n", " ").strip() for i in 索引]
                     raw_non_empty = [p for p in raw_parts if p]
-                    raw = " | ".join(raw_non_empty) if raw_non_empty else ""
+                    raw = " | ".join(raw_non_empty) if raw_non_empty else "默认"
             else:
                 raw = str(values[索引]).replace("\n", " ").strip()
+
+            # 2. 根据字段名渲染
+            if 字段名 == "点击位置(F2)":
+                is_dynamic = False  # 先默认不是动态
+
+                selected_items = self.tree.selection()
+                if selected_items:
+                    selected_item = selected_items[0]
+                    selected_index = self.tree.index(selected_item)
+                    selected_image = self.image_list[selected_index]
+
+                    if selected_image[4]:  # 如果有现有的鼠标操作数据
+                        try:
+                            parts = selected_image[4].split(":")
+                            if len(parts) >= 3:
+                                is_dynamic = parts[2] == "1"  # 判断是否为动态坐标
+                        except:
+                            pass
+
+                if is_dynamic:
+                    raw = "自动计算"
+                    lbl = self.labels[字段名]
+                    lbl.config(text=raw, anchor="e", width=0)
 
             if 字段名 == "识图区域":
                 parts = [p.strip() for p in raw.split("|")]
                 coords = parts[0]
                 area_choice = parts[1]
-                mapped = {"update": "待更新","screenshot": "步骤图片", "manual": "自定义"}.get(area_choice, "全屏")
-                raw = f"{mapped}".strip()
-
+                mapped = {"update": "待更新","screenshot": "步骤图片","manual": "自定义"}.get(area_choice, "全屏")
                 lbl = self.labels[字段名]
                 lbl.unbind("<Enter>")
                 lbl.unbind("<Leave>")
-
-                # 直接显示 `mapped` 文本，不截断，并设置居右
-                lbl.config(text=mapped, anchor="e")  # anchor="e" 表示右对齐
-
-                # 确保 Label 宽度仅适应文本（避免左侧空白区域触发）
-                lbl.config(width=0)  # `width=0` 表示由文本决定宽度
-
-                # 绑定提示（仅在文本区域触发）
+                lbl.config(text=mapped, anchor="e", width=0)
                 def on_enter(e):
-                    # 获取文本实际宽度
                     font = tkFont.Font(font=e.widget["font"])
                     text_width = font.measure(mapped)
-                    
-                    # 计算文本右侧边界（因为居右，文本紧贴右侧）
                     label_width = e.widget.winfo_width()
                     text_right_bound = label_width
                     text_left_bound = text_right_bound - text_width
-                    
-                    # 如果鼠标在文本范围内才触发提示
                     if text_left_bound <= e.x <= text_right_bound:
                         提示管理器.显示提示(e.widget, f"{mapped}({coords})")
-
                 lbl.bind("<Enter>", on_enter)
                 lbl.bind("<Leave>", lambda e: 提示管理器.隐藏提示())
-            else:
+
+            elif 字段名 == "条件判断":
                 lbl = self.labels[字段名]
                 lbl.unbind("<Enter>")
                 lbl.unbind("<Leave>")
+                # 不截断，直接显示完整raw
+                lbl.config(text=raw, anchor="e", width=0)
 
+                if raw == "默认":
+                    # raw 为“默认”时，显示固定提示
+                    def on_enter_default(e):
+                        font = tkFont.Font(font=e.widget["font"])
+                        text_width = font.measure(mapped)
+                        label_width = e.widget.winfo_width()
+                        text_right_bound = label_width
+                        text_left_bound = text_right_bound - text_width
+                        if text_left_bound <= e.x <= text_right_bound:
+                            提示管理器.显示提示(
+                                e.widget,
+                                "识图成功跳转到下一个步骤，识图失败重试当前步骤"
+                            )
+                    lbl.bind("<Enter>", on_enter_default)
+                    lbl.bind("<Leave>", lambda e: 提示管理器.隐藏提示())
+                else:
+                    # raw 非“默认”时，走原有的截断+提示逻辑
+                    max_width = int(self.root.winfo_width() * 3 / 10)
+                    disp = 截断文本(raw, max_width, lbl)
+                    lbl.config(text=disp)
+                    font = tkFont.Font(font=lbl['font'])
+                    if font.measure(raw) > max_width:
+                        lbl.bind(
+                            "<Enter>",
+                            lambda e, t=raw: 提示管理器.显示提示(e.widget, t)
+                        )
+                        lbl.bind("<Leave>", lambda e: 提示管理器.隐藏提示())
+
+            else:
+                # 其它字段，沿用原有逻辑
+                lbl = self.labels[字段名]
+                lbl.unbind("<Enter>")
+                lbl.unbind("<Leave>")
                 max_width = int(self.root.winfo_width() * 3 / 10)
                 disp = 截断文本(raw, max_width, lbl)
                 lbl.config(text=disp)
-
                 font = tkFont.Font(font=lbl['font'])
                 if font.measure(raw) > max_width:
-                    lbl.bind("<Enter>", lambda e, t=raw: 提示管理器.显示提示(e.widget, t))
+                    lbl.bind(
+                        "<Enter>",
+                        lambda e, t=raw: 提示管理器.显示提示(e.widget, t)
+                    )
                     lbl.bind("<Leave>", lambda e: 提示管理器.隐藏提示())
+
 
     def clear_labels(self):
         """清空 Label 内容"""
@@ -1529,25 +1616,35 @@ class ImageRecognitionApp:
 
     def register_global_hotkey(self):
         try:
-            # 注册主功能热键
+            # 注册开始/停止热键
             def main_hotkey_callback():
                 self.root.after(0, self.toggle_script)
                 
             main_hotkey_str = self.hotkey.replace('<', '').replace('>', '').lower()
             keyboard.add_hotkey(main_hotkey_str, main_hotkey_callback)
             
-            # 注册截图热键（新增）
+            # 注册截图热键
             def screenshot_hotkey_callback():
                 self.root.after(0, self.prepare_capture_screenshot)
                 
             keyboard.add_hotkey(self.screenshot_hotkey, screenshot_hotkey_callback)
+
+            # 注册重新截图热键
+            def retake_image_hotkey_callback():
+                self.root.after(0, self.retake_screenshot)
+                
+            keyboard.add_hotkey(self.retake_image_hotkey, retake_image_hotkey_callback)
+
+            # 注册更改点击坐标热键
+            def change_coodr_hotkey_callback():
+                self.root.after(0, self.get_mouse_position)
+                
+            keyboard.add_hotkey(self.change_coodr_hotkey, change_coodr_hotkey_callback)
             
             # 日志记录
             print("-" * 85)
             logging.info("-" * 85)
-            print(f"主功能热键已注册：{self.hotkey}")
-            print(f"截图热键已注册：{self.screenshot_hotkey}")
-            logging.info("程序启动 - 热键注册完成")
+            logging.info("程序启动 - 热键注册完成\n开始/停止  F9\n截图  F8\n重新截图  F4\n更改点击坐标  F2")
             
         except Exception as e:
             print(f"注册热键失败: {e}")
@@ -1555,15 +1652,12 @@ class ImageRecognitionApp:
 
     def unregister_global_hotkey(self):
         try:
-            # 注销主热键
+            # 注销热键
             main_hotkey_str = self.hotkey.replace('<', '').replace('>', '').lower()
             keyboard.remove_hotkey(main_hotkey_str)
-            
-            # 注销截图热键（新增）
             keyboard.remove_hotkey(self.screenshot_hotkey)
-            
-            print(f"主功能热键已注销：{self.hotkey}")
-            print(f"截图热键已注销：{self.screenshot_hotkey}")
+            keyboard.remove_hotkey(self.retake_image_hotkey)
+            keyboard.remove_hotkey(self.change_coodr_hotkey)
             
         except Exception as e:
             print(f"注销全局热键出错：{e}")
@@ -1927,8 +2021,13 @@ class ImageRecognitionApp:
                 self.root.after(0, self.update_ui_after_stop)
 
     def retake_screenshot(self, event=None):
-        self.need_retake_screenshot = True     
-        self.prepare_capture_screenshot()
+        selected_item = self.tree.selection()
+        if selected_item:
+            self.need_retake_screenshot = True     
+            self.prepare_capture_screenshot()
+        else:
+            messagebox.showerror("错误", "请选中1个步骤后重试")
+            return
    
     def update_image_listbox(self,filter_text=""):
         try:   
@@ -2444,6 +2543,7 @@ class ImageRecognitionApp:
             # 获取屏幕截图
             screenshot = pyautogui.screenshot()
             screenshot = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
+            x1 = y1 = 0  # 动态点击初始偏移量
             
             if area_choice_value not in ('fullscreen', 'update'):
                 try:
@@ -2462,6 +2562,10 @@ class ImageRecognitionApp:
             # 执行模板匹配
             result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
             min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+
+        # 确保 max_val 是非负数
+        if max_val < 0:
+            max_val = 0
 
         if max_val >= similarity_threshold:
 
@@ -2523,10 +2627,10 @@ class ImageRecognitionApp:
                             # 对于需要计数的操作（点击、滚轮），解析最后的数字，默认 1
                             count_val = int(parts[3]) if len(parts) > 3 else 1  
 
-                            # 计算点击或滚动的参考位置
+                            # 计算动态点击的位置
                             if is_dynamic == "1":
-                                x = max_loc[0] + template.shape[1] // 2
-                                y = max_loc[1] + template.shape[0] // 2
+                                x = max_loc[0] + template.shape[1] // 2 + x1
+                                y = max_loc[1] + template.shape[0] // 2 + y1
                             else:
                                 x, y = map(int, coords.split(","))
 
@@ -2981,7 +3085,6 @@ class ImageRecognitionApp:
                 new_image = tpl[:4] + (mouse_action,) + tpl[5:10] + (mouse_action_result,) + tpl[11:]
                 self.image_list[selected_index] = new_image
 
-                
                 self.update_image_listbox()
                 dialog.destroy()
 
@@ -4615,6 +4718,10 @@ class ImageRecognitionApp:
             
             self.update_image_listbox()
             messagebox.showinfo("更新坐标", f"坐标已更新为({x}, {y})")
+
+        else:
+            messagebox.showerror("错误", "请选中1个步骤后重试")
+            return
    
     def cleanup_on_exit(self):
         try:
@@ -5229,6 +5336,7 @@ class ImageRecognitionApp:
             self.update_image_listbox()
     
     def image_rc_area(self):
+        self.rc_area_dialog = True
         need_disable = False
         screen_w = self.root.winfo_screenwidth()
         screen_h = self.root.winfo_screenheight()
@@ -5309,10 +5417,12 @@ class ImageRecognitionApp:
                 print(f"【{step_name}】识图区域更新: ({old_coords}) → ({img_left},{img_top},{img_right},{img_bottom})")
 
             dialog.destroy()
+            self.rc_area_dialog = False
             self.update_image_listbox()
 
         def on_cancel():
             dialog.destroy()
+            self.rc_area_dialog = False
 
         btn_cancel = ttk.Button(frame_buttons, text="取消", command=on_cancel, bootstyle="primary-outline")
         btn_save = ttk.Button(frame_buttons, text="保存", command=on_save, bootstyle="primary-outline")
@@ -5353,7 +5463,6 @@ class ImageRecognitionApp:
             self.root.after(200, _after_hide_window)
 
         def _after_hide_window():
-            # 原有：防止全屏蓝框
             left, top, right, bottom = map(int, coords.split(","))
             if left == 0 and top == 0 and right == screen_w and bottom == screen_h:
                 # 全屏模式使用默认居中区域
@@ -5682,7 +5791,8 @@ class ImageRecognitionApp:
                 final_name = new_name
 
             # 更新 image_list 主项
-            new_image = selected_image[:1] + [final_name] + selected_image[2:]
+            new_image = list(selected_image)
+            new_image[1] = final_name
             self.image_list[selected_index] = new_image
 
             # 🔁 遍历 self.image_list每项索引 7, 9, 12, 13
@@ -5695,7 +5805,6 @@ class ImageRecognitionApp:
                         updated = True
                 if updated:
                     self.image_list[i] = tuple(img_list)  # 修改后转回元组并赋值回原列表
-                    print("yes")
             # 更新 Treeview 第2列
             all_values = list(self.tree.item(selected_item, 'values'))
             if len(all_values) > 1:
@@ -5771,12 +5880,14 @@ class ImageRecognitionApp:
 
         # 生成所有步骤名称供下拉使用（第一个值固定为“无”）
         step_names = ["无"] + [img[1] for img in self.image_list if img[1]]
+        step_names_2 = [img[1] for img in self.image_list if img[1]]
 
         # 取出现有的两个跳转值
         current_jump1 = selected_image[7] if len(selected_image) > 7 else ""
         current_jump2 = selected_image[12] if len(selected_image) > 12 else ""
+        step_name = selected_image[1]
         jump_var1 = tk.StringVar(value="无" if not current_jump1 else current_jump1)
-        jump_var2 = tk.StringVar(value="无" if not current_jump2 else current_jump2)
+        jump_var2 = tk.StringVar(value= "无" if not current_jump2 else current_jump2)
 
         # 第一个跳转下拉框
         jump_combo1 = ttk.Combobox(
@@ -5894,22 +6005,12 @@ class ImageRecognitionApp:
             dis1 = "" if dis1 == "无" else dis1
             dis2 = "" if dis2 == "无" else dis2
 
-            # 验证逻辑：只要存在任意跳转或禁用，就必须填写条件
-            if (jump1 or dis1) and not (cond1):
-                messagebox.showwarning(
-                    "警告", 
-                    "请指定条件1！", 
-                    parent=dialog
-                )
-                return
-            
-            if (jump2 or dis2) and not (cond2):
-                messagebox.showwarning(
-                    "警告", 
-                    "请指定条件2！", 
-                    parent=dialog
-                )
-                return
+            # 验证逻辑：如果不存在存在任意跳转或禁用，则清空条件
+            if (cond1) and not (jump1 or dis1):
+                cond1 = ""
+
+            if (cond2) and not (jump2 or dis2):
+                cond2 = ""
 
             try:
                 # 确保 selected_image 列表长度
