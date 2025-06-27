@@ -4,7 +4,7 @@ import re
 import subprocess
 import tempfile
 import tkinter as tk
-from tkinter import filedialog, ttk, messagebox
+from tkinter import Label, Toplevel, filedialog, ttk, messagebox
 from urllib.parse import urlparse
 import zipfile
 from PIL import Image, ImageTk, ImageGrab, ImageDraw
@@ -34,7 +34,7 @@ from packaging import version
 import tkinter.font as tkFont
 from ttkbootstrap.widgets import Entry
 
-CURRENT_VERSION = "v1.1.8" #版本号
+CURRENT_VERSION = "v1.1.9" #版本号
 
 def run_as_admin():
     if ctypes.windll.shell32.IsUserAnAdmin():
@@ -62,6 +62,44 @@ def load_icon(icon_name, size=(18, 18)):
         raise FileNotFoundError(f"图标文件未找到: {icon_path}")
     except Exception as e:
         raise Exception(f"加载图标时出错: {str(e)}")
+
+class ToolTip:
+    def __init__(self, widget, text, root):
+        self.widget = widget
+        self.text = text
+        self.root = root
+        self.tipwindow = None
+
+    def showtip(self):
+        if self.tipwindow or not self.text:
+            return
+        tw = Toplevel(self.root)
+        self.tipwindow = tw
+        tw.wm_overrideredirect(True)
+        tw.transient(self.root)
+        tw.attributes('-topmost', True)
+        tw.lift()
+
+        x = self.widget.winfo_rootx() + 15
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
+        tw.geometry(f"+{x}+{y}")
+
+        # 使用指定样式创建标签
+        Label(
+            tw,
+            text=self.text,
+            bg="#FFFFE0",
+            relief="solid",
+            borderwidth=1,
+            padx=5,
+            pady=2,
+            justify="left"
+        ).pack()
+
+    def hidetip(self):
+        if self.tipwindow:
+            self.tipwindow.destroy()
+            self.tipwindow = None
 
 class ImageRecognitionApp:
     def __init__(self, root):
@@ -102,7 +140,6 @@ class ImageRecognitionApp:
         self.is_dragging = False
         self.rc_area_change = False
         self.step_on_search = False
-        self.rc_area_dialog = False
         self.last_area_choice = 'screenshot'
 
         self.checking_update = False
@@ -181,32 +218,6 @@ class ImageRecognitionApp:
         self.bordered_frame = tk.Frame(self.region_a)
         self.bordered_frame.pack(fill=tk.BOTH, padx=0, pady=0)
 
-        def on_region_a_enter(event):
-            if self.follow_current_step.get() and not self.rc_area_dialog:
-                # 鼠标进入 region_a，取消置顶
-                self.root.attributes('-topmost', False)
-
-        def on_region_a_leave(event):
-            if not self.follow_current_step.get() and not self.rc_area_dialog:
-                return
-
-            # region_a 的全局坐标和尺寸
-            x0 = self.region_a.winfo_rootx()
-            y0 = self.region_a.winfo_rooty()
-            x1 = x0 + self.region_a.winfo_width()
-            y1 = y0 + self.region_a.winfo_height()
-
-            # 鼠标当前全局坐标
-            mx, my = event.x_root, event.y_root
-
-            # 只有当鼠标真地跑到 region_a 的外面，才恢复置顶
-            if not (x0 <= mx <= x1 and y0 <= my <= y1):
-                self.root.attributes('-topmost', True)
-
-        # 绑定事件
-        self.region_a.bind("<Enter>", on_region_a_enter)
-        self.region_a.bind("<Leave>", on_region_a_leave)
-
         # 配置按钮行
         self.config_button_frame = ttk.Frame(self.bordered_frame)
         self.config_button_frame.pack(fill=tk.BOTH, expand=True, pady=(5, 10))
@@ -218,18 +229,25 @@ class ImageRecognitionApp:
             command=self.export_config, 
             bootstyle="primary-outline"
         )
-        self.Export_config_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
-        ToolTip(self.Export_config_button, "导出配置")
-        self.Export_config_button.bind(
-            "<Enter>",
-            lambda e: on_enter(e, self.Export_config_button, self.hover_icons["export"]), add="+"    
-        )
-        self.Export_config_button.bind(
-            "<Leave>",
-            lambda e: on_leave(e, self.Export_config_button, self.icons["export"]), add="+"       
-        )
+        self.Export_config_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0,5))
 
-        # 导入配置按钮
+        # 保存 tooltip 实例
+        self.export_tooltip = ToolTip(self.Export_config_button, "导出配置", self.root)
+
+        # 复合回调
+        def _on_export_enter(e):
+            self.export_tooltip.showtip()
+            on_enter(e, self.Export_config_button, self.hover_icons["export"])
+
+        def _on_export_leave(e):
+            self.export_tooltip.hidetip()
+            on_leave(e, self.Export_config_button, self.icons["export"])
+
+        self.Export_config_button.bind("<Enter>", _on_export_enter, add="+")
+        self.Export_config_button.bind("<Leave>", _on_export_leave, add="+")
+
+
+        # —– 导入配置按钮 —–
         self.Import_config_button = ttk.Button(
             self.config_button_frame, 
             image=self.icons["import"],
@@ -237,17 +255,22 @@ class ImageRecognitionApp:
             bootstyle="primary-outline"
         )
         self.Import_config_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
-        ToolTip(self.Import_config_button, "导入配置")
-        self.Import_config_button.bind(
-            "<Enter>", 
-            lambda e: on_enter(e, self.Import_config_button, self.hover_icons["import"]), add="+"  
-        )
-        self.Import_config_button.bind(
-            "<Leave>", 
-            lambda e: on_leave(e, self.Import_config_button, self.icons["import"]), add="+"  
-        )
 
-        # 保存配置按钮
+        self.import_tooltip = ToolTip(self.Import_config_button, "导入配置", self.root)
+
+        def _on_import_enter(e):
+            self.import_tooltip.showtip()
+            on_enter(e, self.Import_config_button, self.hover_icons["import"])
+
+        def _on_import_leave(e):
+            self.import_tooltip.hidetip()
+            on_leave(e, self.Import_config_button, self.icons["import"])
+
+        self.Import_config_button.bind("<Enter>", _on_import_enter, add="+")
+        self.Import_config_button.bind("<Leave>", _on_import_leave, add="+")
+
+
+        # —– 保存配置按钮 —–
         self.save_config_button = ttk.Button(
             self.config_button_frame, 
             image=self.icons["save"],
@@ -255,33 +278,43 @@ class ImageRecognitionApp:
             bootstyle="primary-outline"
         )
         self.save_config_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
-        ToolTip(self.save_config_button, "保存配置")
-        self.save_config_button.bind(
-            "<Enter>", 
-            lambda e: on_enter(e, self.save_config_button, self.hover_icons["save"]), add="+"  
-        )
-        self.save_config_button.bind(
-            "<Leave>", 
-            lambda e: on_leave(e, self.save_config_button, self.icons["save"]), add="+"  
-        )
 
-        # 加载配置按钮
+        self.save_tooltip = ToolTip(self.save_config_button, "保存配置", self.root)
+
+        def _on_save_enter(e):
+            self.save_tooltip.showtip()
+            on_enter(e, self.save_config_button, self.hover_icons["save"])
+
+        def _on_save_leave(e):
+            self.save_tooltip.hidetip()
+            on_leave(e, self.save_config_button, self.icons["save"])
+
+        self.save_config_button.bind("<Enter>", _on_save_enter, add="+")
+        self.save_config_button.bind("<Leave>", _on_save_leave, add="+")
+
+
+        # —– 加载配置按钮 —–
         self.load_config_button = ttk.Button(
             self.config_button_frame, 
             image=self.icons["load"],
             command=self.load_config, 
             bootstyle="primary-outline"
         )
-        self.load_config_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 0))
-        ToolTip(self.load_config_button, "加载配置")
-        self.load_config_button.bind(
-            "<Enter>", 
-            lambda e: on_enter(e, self.load_config_button, self.hover_icons["load"]), add="+"  
-        )
-        self.load_config_button.bind(
-            "<Leave>", 
-            lambda e: on_leave(e, self.load_config_button, self.icons["load"]), add="+"  
-        )
+        self.load_config_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5,0))
+
+        self.load_tooltip = ToolTip(self.load_config_button, "加载配置", self.root)
+
+        def _on_load_enter(e):
+            self.load_tooltip.showtip()
+            on_enter(e, self.load_config_button, self.hover_icons["load"])
+
+        def _on_load_leave(e):
+            self.load_tooltip.hidetip()
+            on_leave(e, self.load_config_button, self.icons["load"])
+
+        self.load_config_button.bind("<Enter>", _on_load_enter, add="+")
+        self.load_config_button.bind("<Leave>", _on_load_leave, add="+")
+
 
         # 操作按钮行
         self.top_button_frame = tb.Frame(self.bordered_frame)
@@ -295,15 +328,24 @@ class ImageRecognitionApp:
             bootstyle="primary-outline"
         )
         self.screenshot_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
-        ToolTip(self.screenshot_button, "截取图片以添加步骤(F8)")
-        self.screenshot_button.bind(
-            "<Enter>",
-            lambda e: on_enter(e, self.screenshot_button, self.hover_icons["add"]), add="+"    
+        # —— 1) 保存 tooltip 实例
+        self.screenshot_tooltip = ToolTip(
+            self.screenshot_button,
+            "截取图片以添加步骤(F8)",
+            self.root
         )
-        self.screenshot_button.bind(
-            "<Leave>",
-            lambda e: on_leave(e, self.screenshot_button, self.icons["add"]), add="+"       
-        )
+
+        # —— 2) 复合绑定：显示 tooltip + 切换图标
+        def _on_enter(e):
+            self.screenshot_tooltip.showtip()
+            on_enter(e, self.screenshot_button, self.hover_icons["add"])
+
+        def _on_leave(e):
+            self.screenshot_tooltip.hidetip()
+            on_leave(e, self.screenshot_button, self.icons["add"])
+
+        self.screenshot_button.bind("<Enter>", _on_enter, add="+")
+        self.screenshot_button.bind("<Leave>", _on_leave, add="+")
 
         # 运行/停止脚本按钮
         self.toggle_run_button = tb.Button(
@@ -602,20 +644,6 @@ class ImageRecognitionApp:
         # 区域D：紧贴区域C（取消顶部边距）
         self.region_d = tb.Frame(self.region_r, style="InnerR.TFrame")
         self.region_d.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))  
-
-        def on_region_d_enter(event):
-            if self.follow_current_step.get() and not self.rc_area_dialog:
-                # 鼠标进入 region_d，取消置顶
-                self.root.attributes('-topmost', False)
-
-        def on_region_d_leave(event):
-            if self.follow_current_step.get() and not self.rc_area_dialog:
-                # 鼠标离开 region_d，恢复置顶
-                self.root.attributes('-topmost', True)
-
-        # 绑定事件
-        self.region_d.bind("<Enter>", on_region_d_enter)
-        self.region_d.bind("<Leave>", on_region_d_leave)
 
         # 详细信息标签区域
         # —— 第一行：标题 + 文件名 —— #
@@ -1073,7 +1101,7 @@ class ImageRecognitionApp:
         """显示更新可用"""
         try:
             self._create_update_window(
-                f"发现新版本 {self.latest_version}，当前版本: {CURRENT_VERSION}",
+                f"发现新版本 ({self.latest_version})",
                 show_progress=False
             )
             if self.update_button:
@@ -1408,8 +1436,9 @@ class ImageRecognitionApp:
                 self.隐藏提示()
                 最大宽度 = int(self.master.winfo_width() * 2 / 5)
                 font = tkFont.Font(font=控件['font'])
+
+                # 自动换行处理
                 if font.measure(文本) > 最大宽度:
-                    # 自动换行（按像素分段）
                     每行像素 = 最大宽度
                     当前宽 = 0
                     行 = ""
@@ -1427,11 +1456,19 @@ class ImageRecognitionApp:
                         行集.append(行)
                     文本 = "\n".join(行集)
 
+                # 创建 Toplevel 提示框
                 self.当前提示 = tk.Toplevel(self.master)
                 self.当前提示.wm_overrideredirect(True)
+
+                # ✅ 设置置顶
+                self.当前提示.attributes("-topmost", True)
+                self.当前提示.lift()
+
+                # 放置在控件下方
                 x = 控件.winfo_rootx() + 15
                 y = 控件.winfo_rooty() + 控件.winfo_height() + 5
                 self.当前提示.wm_geometry(f"+{x}+{y}")
+
                 tk.Label(
                     self.当前提示,
                     text=文本,
@@ -1722,7 +1759,6 @@ class ImageRecognitionApp:
 
         # 在窗口呈现后，延迟执行一次自动点击
         self.top.after(100, self._auto_click_current_position)  # 设置延迟 100 毫秒
-        self.top.after(1000, self._auto_click_current_position)
 
     def _auto_click_current_position(self):
         if not self.is_dragging:
@@ -1816,7 +1852,13 @@ class ImageRecognitionApp:
 
         # 构造截图区域字符串,“screenshot”为选项默认值
         img_left, img_top, img_right, img_bottom = left, top, right, bottom
-        recognition_area = f"{left},{top},{right},{bottom}|screenshot|{img_left},{img_top},{img_right},{img_bottom}"  
+        area_offset = 5
+        img_left = max(0, img_left - area_offset)
+        img_top = max(0, img_top - area_offset)
+        img_right += area_offset
+        img_bottom += area_offset
+
+        recognition_area = f"{img_left},{img_top},{img_right},{img_bottom}|screenshot|{img_left},{img_top},{img_right},{img_bottom}"  
     
         # 使用规则 "截图（时间）.png" 命名截图文件避免重复
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")  # 生成时间戳
@@ -2208,6 +2250,34 @@ class ImageRecognitionApp:
                     except Exception as e:
                         logging.error(f"删除图像文件时出错: {e}")
 
+            # 删除硬盘文件后，清空 self.image_list 每项索引 7, 9, 12, 13 中与被删项目 item[1] 相同的值
+            deleted_names = [self.tree.item(item, 'values')[1] for item in selected_items]  # 获取被删除项目的名称
+
+            for i, img_data in enumerate(self.image_list):
+                img_list = list(img_data)  # 转为可修改列表
+                updated = False
+
+                # 清空7,9,12,13中匹配deleted_names的值
+                for idx in [7, 9, 12, 13]:
+                    if len(img_list) > idx and img_list[idx] in deleted_names:
+                        img_list[idx] = ""
+                        updated = True
+
+                # 如果7和9都为空，清空6
+                if len(img_list) > 9 and not img_list[7] and not img_list[9]:
+                    if len(img_list) > 6:
+                        img_list[6] = ""
+                        updated = True
+
+                # 如果12和13都为空，清空11
+                if len(img_list) > 13 and not img_list[12] and not img_list[13]:
+                    if len(img_list) > 11:
+                        img_list[11] = ""
+                        updated = True
+
+                if updated:
+                    self.image_list[i] = tuple(img_list)  # 写回修改后的元组
+
             # 刷新界面
             self.update_image_listbox()
             self.load_default_image()
@@ -2522,7 +2592,8 @@ class ImageRecognitionApp:
             mouse_coordinates = current_step[4]  # 获取鼠标坐标
             keyboard_input = current_step[3]  # 获取键盘输入
             step_name = current_step[1] #获取步骤名称
-            similarity_threshold = current_step[2] #获取相似度
+            similarity_threshold = float(current_step[2])  # 获取相似度并转为 float
+
             # 从selected_items[14]获取识别范围，并取"|"分隔的第一段
             recognition_area = current_step[14].split("|")[0] if len(current_step) > 14 else fullscreen_coodrs
             area_choice_value = current_step[14].split("|")[1] if len(current_step) > 14 else 'fullscreen'
@@ -2566,6 +2637,8 @@ class ImageRecognitionApp:
         # 确保 max_val 是非负数
         if max_val < 0:
             max_val = 0
+
+        max_val = round(max_val, 1)   #匹配的最大相似度结果保留1位小数
 
         if max_val >= similarity_threshold:
 
@@ -2637,16 +2710,21 @@ class ImageRecognitionApp:
                             # 执行相应的鼠标操作
                             if action == "click":
                                 for _ in range(count_val):
-                                    pyautogui.click(x, y)
+                                    pyautogui.moveTo(x, y)
+                                    pyautogui.click()
                             elif action == "rightClick":
                                 pyautogui.moveTo(x, y)
                                 pyautogui.rightClick()
                             elif action == "doubleClick":
-                                pyautogui.doubleClick(x, y)
+                                pyautogui.moveTo(x, y)
+                                pyautogui.doubleClick()
                             elif action == "mouseDown":
-                                pyautogui.mouseDown(x, y)
+                                pyautogui.moveTo(x, y)
+                                pyautogui.mouseDown()
                             elif action == "mouseUp":
-                                pyautogui.mouseUp(x, y)
+                                pyautogui.moveTo(x, y, duration=0.1) 
+                                pyautogui.mouseUp()                
+
                             elif action == "scrollUp":
                                 # 移动到坐标后，再执行滚轮操作
                                 pyautogui.moveTo(x, y)
@@ -2656,6 +2734,7 @@ class ImageRecognitionApp:
                             elif action == "scrollDown":
                                 # 移动到坐标后，再执行滚轮操作
                                 pyautogui.moveTo(x, y)
+                                time.sleep(0.1)
                                 # 循环 count_val 次，每次滚动 70 行（调用时转换为负值表示向下滚动）
                                 for _ in range(count_val):
                                     pyautogui.scroll(-70, x=x, y=y)
@@ -3531,7 +3610,6 @@ class ImageRecognitionApp:
             messagebox.showerror("保存失败", error_msg, parent=self.root)
    
     def load_config(self):
-
         # 获取程序工作目录
         working_dir = os.getcwd()
 
@@ -4406,7 +4484,7 @@ class ImageRecognitionApp:
 
             # 一次性设置大小和位置，并显示
             export_window.geometry(f"{new_w}x{new_h}+{x}+{y}")
-            export_window.deiconify()
+            export_window.deiconify()  # 显示窗口
 
         except Exception as e:
             logging.error(f"导出配置时出错: {str(e)}")
@@ -4416,6 +4494,7 @@ class ImageRecognitionApp:
         try:
             # 弹出文件选择对话框，支持选择.json或.zip文件
             filename = filedialog.askopenfilename(
+                parent=self.root,  #指定父窗口
                 filetypes=[
                     ("JSON/ZIP files", "*.json;*.zip"),
                     ("JSON files", "*.json"),
@@ -5336,7 +5415,6 @@ class ImageRecognitionApp:
             self.update_image_listbox()
     
     def image_rc_area(self):
-        self.rc_area_dialog = True
         need_disable = False
         screen_w = self.root.winfo_screenwidth()
         screen_h = self.root.winfo_screenheight()
@@ -5417,12 +5495,10 @@ class ImageRecognitionApp:
                 print(f"【{step_name}】识图区域更新: ({old_coords}) → ({img_left},{img_top},{img_right},{img_bottom})")
 
             dialog.destroy()
-            self.rc_area_dialog = False
             self.update_image_listbox()
 
         def on_cancel():
             dialog.destroy()
-            self.rc_area_dialog = False
 
         btn_cancel = ttk.Button(frame_buttons, text="取消", command=on_cancel, bootstyle="primary-outline")
         btn_save = ttk.Button(frame_buttons, text="保存", command=on_save, bootstyle="primary-outline")
