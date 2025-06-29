@@ -107,7 +107,7 @@ class ImageRecognitionApp:
         self.root = root
         self.root.title("ImgRC")
         self.style = tb.Style(theme='flatly')  # 选择一个主题
-        self.image_list = []  # 存储 (图像路径, 步骤名称, 相似度, 键盘动作, 点击位置(F2), 延时ms, 条件, 需跳转，状态， 需禁用， 鼠标动作， 识图区域)
+        self.image_list = []  # 存储 (图像路径, 步骤名称, 相似度, 键盘动作, 点击位置, 延时ms, 条件, 需跳转，状态， 需禁用， 鼠标动作， 识图区域)
         self.screenshot_area = None  # 用于存储截图区域
         self.rect = None  # 用于存储 Canvas 上的矩形
         self.start_x = None
@@ -353,7 +353,7 @@ class ImageRecognitionApp:
         # —— 1) 保存 tooltip 实例
         self.record_tooltip = ToolTip(
             self.record_button,
-            "开始/停止录制动作以添加步骤",
+            "开始/停止录制动作以添加步骤\n快捷键：Ctrl + F8",
             self.root
         )
 
@@ -384,7 +384,7 @@ class ImageRecognitionApp:
         # —— 1) 保存 tooltip 实例
         self.screenshot_tooltip = ToolTip(
             self.screenshot_button,
-            "截取图片以添加步骤(F8)",
+            "截取图片以添加步骤\n快捷键：F8",
             self.root
         )
 
@@ -413,7 +413,7 @@ class ImageRecognitionApp:
         # —— 1) 保存 tooltip 实例，不要覆盖按钮变量
         self.toggle_run_tooltip = ToolTip(
             self.toggle_run_button,
-            "开始/停止执行步骤(F9)",
+            "开始/停止执行步骤\n快捷键：F9",
             self.root
         )
 
@@ -591,14 +591,14 @@ class ImageRecognitionApp:
 
         # 使用 Treeview 来显示图片和延时ms
         self.tree = ttk.Treeview(self.region_b, columns=(
-            "图片名称", "步骤名称", "相似度", "键盘动作", "点击位置(F2)", "延时ms", "条件", 
+            "图片名称", "步骤名称", "相似度", "键盘动作", "点击位置", "延时ms", "条件", 
             "需跳转", "状态", "需禁用", "鼠标动作", "条件2", "需跳转2", "需禁用2", "识图区域"
         ), show='headings')#新增索引
         self.tree.heading("图片名称", text="图片名称")
         self.tree.heading("步骤名称", text="步骤名称")
         self.tree.heading("相似度", text="相似度")
         self.tree.heading("键盘动作", text="键盘动作")
-        self.tree.heading("点击位置(F2)", text="点击位置(F2)")
+        self.tree.heading("点击位置", text="点击位置")
         self.tree.heading("延时ms", text="延时ms")
         self.tree.heading("条件", text="条件")
         self.tree.heading("需跳转", text="需跳转")
@@ -616,7 +616,7 @@ class ImageRecognitionApp:
         self.tree.column("步骤名称", width=75, anchor='center')
         self.tree.column("相似度", width=75, anchor='center')
         self.tree.column("键盘动作", width=75, anchor='center')
-        self.tree.column("点击位置(F2)", width=75, anchor='center')
+        self.tree.column("点击位置", width=75, anchor='center')
         self.tree.column("延时ms", width=75, anchor='center')
         self.tree.column("条件", width=20, anchor='center')
         self.tree.column("需跳转", width=75, anchor='center')
@@ -780,7 +780,7 @@ class ImageRecognitionApp:
         self.labels = {}         # 右侧：字段值 Label
         self.label_titles = {}   # ✅ 左侧：字段名 Label
 
-        字段名列表 = ["图片名称", "识图区域", "条件判断", "相似度", "点击位置(F2)", "键盘动作", "鼠标动作", "状态"]
+        字段名列表 = ["图片名称", "识图区域", "条件判断", "相似度", "点击位置", "键盘动作", "鼠标动作", "状态"]
 
         for name in 字段名列表:
             row_frame = tk.Frame(self.labels_frame)
@@ -1615,7 +1615,7 @@ class ImageRecognitionApp:
             "识图区域": 14,
             "条件判断": [6, 7, 9, 11, 12, 13],
             "相似度": 2,
-            "点击位置(F2)": 4,
+            "点击位置": 4,
             "键盘动作": 3,
             "鼠标动作": 10,
             "状态": 8
@@ -1663,29 +1663,52 @@ class ImageRecognitionApp:
                 lbl = self.labels[字段名]
                 lbl.config(foreground="red" if raw == "禁用" else "#495057")
 
-            if 字段名 == "点击位置(F2)":
-                is_dynamic = False  # 先默认不是动态
+            elif 字段名 == "点击位置":
+                is_dynamic = False  # 默认非动态
 
                 selected_items = self.tree.selection()
                 if selected_items:
                     selected_item = selected_items[0]
                     selected_index = self.tree.index(selected_item)
                     selected_image = self.image_list[selected_index]
-
-                    if selected_image[4]:  # 如果有现有的鼠标操作数据
+                    if selected_image[4]:
                         try:
                             parts = selected_image[4].split(":")
                             if len(parts) >= 3:
-                                is_dynamic = parts[2] == "1"  # 判断是否为动态坐标
+                                is_dynamic = parts[2] == "1"
                         except:
                             pass
 
                 if is_dynamic:
                     raw = "自动计算"
-                    lbl = self.labels[字段名]
-                    lbl.config(text=raw, anchor="e", width=0)
 
-            if 字段名 == "识图区域":
+                lbl = self.labels[字段名]
+                lbl.unbind("<Enter>")
+                lbl.unbind("<Leave>")
+
+                # 不截断，直接显示完整 raw
+                lbl.config(text=raw, anchor="e", width=0)
+
+                if raw != "默认":
+                    disp = 截断文本(raw, max_width, lbl)
+                    lbl.config(text=disp, anchor="e", width=0)
+
+                    def on_enter_clickpos(e):
+                        font = tkFont.Font(font=e.widget["font"])
+                        text_width = font.measure(disp)  # ✅ 用显示出来的文字
+                        label_width = e.widget.winfo_width()
+                        text_right_bound = label_width
+                        text_left_bound = text_right_bound - text_width
+                        if text_left_bound <= e.x <= text_right_bound:
+                            提示管理器.显示提示(
+                                e.widget,
+                                "快速修改点击位置\n快捷键：F2"
+                            )
+
+                    lbl.bind("<Enter>", on_enter_clickpos)
+                    lbl.bind("<Leave>", lambda e: 提示管理器.隐藏提示())
+
+            elif 字段名 == "识图区域":
                 parts = [p.strip() for p in raw.split("|")]
                 coords = parts[0]
                 area_choice = parts[1]
