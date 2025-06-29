@@ -1689,7 +1689,7 @@ class ImageRecognitionApp:
                 # 不截断，直接显示完整 raw
                 lbl.config(text=raw, anchor="e", width=0)
 
-                if raw != "默认":
+                if raw != "自动计算":
                     disp = 截断文本(raw, max_width, lbl)
                     lbl.config(text=disp, anchor="e", width=0)
 
