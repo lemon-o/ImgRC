@@ -4748,7 +4748,7 @@ class ImageRecognitionApp:
                 self.tree.delete(item)
 
             for i, img_data in enumerate(self.image_list):
-                if not dialog_shown and time.time() - start_time > 0.2:
+                if not dialog_shown and time.time() - start_time > 0.1:
                     self.show_loading_dialog()
                     dialog_shown = True
 
