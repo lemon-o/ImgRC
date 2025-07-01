@@ -35,7 +35,7 @@ import tkinter.font as tkFont
 from ttkbootstrap.widgets import Entry
 from pynput import mouse
 
-CURRENT_VERSION = "v1.2.0" #版本号
+CURRENT_VERSION = "v1.2.1" #版本号
 
 def run_as_admin():
     if ctypes.windll.shell32.IsUserAnAdmin():
@@ -52,13 +52,23 @@ def run_as_admin():
 
 run_as_admin()
 
-def load_icon(icon_name, size=(20, 20)):
-    # 构建图标完整路径
+def load_icon(icon_name, root, scale=0.49): #scale为图标缩放比例
+
     icon_path = os.path.join('icon', icon_name)
-    
+
     try:
+        root.update_idletasks()
+        win_width = root.winfo_width()
+
+        if win_width <= 1:
+            win_width = 180  # 默认宽度
+
+        icon_size = int(win_width * scale)
+        size = (icon_size, icon_size)  # 宽高相同，均基于窗口宽度
+
         img = Image.open(icon_path).resize(size, Image.Resampling.LANCZOS)
         return ImageTk.PhotoImage(img)
+
     except FileNotFoundError:
         raise FileNotFoundError(f"图标文件未找到: {icon_path}")
     except Exception as e:
@@ -107,7 +117,10 @@ class ImageRecognitionApp:
         self.root = root
         self.root.title("ImgRC")
         self.style = tb.Style(theme='flatly')  # 选择一个主题
-        self.image_list = []  # 存储 (图像路径, 步骤名称, 相似度, 键盘动作, 点击位置, 延时ms, 条件, 需跳转，状态， 需禁用， 鼠标动作， 识图区域)
+        self.image_list = []  # 存储 (图像路径, 步骤名称, 识图阈值, 键盘动作, 点击位置, 延时ms, 条件, 需跳转，状态， 需禁用， 鼠标动作， 识图区域)
+        self.filtered_index_map = []
+        self.filtered_config_indices = []
+        self.current_filter_text = ""
         self.screenshot_area = None  # 用于存储截图区域
         self.rect = None  # 用于存储 Canvas 上的矩形
         self.start_x = None
@@ -118,9 +131,9 @@ class ImageRecognitionApp:
         self.hotkey = 'F9'  # 开始/停止热键
         self.screenshot_hotkey = "F8"    # 截图热键
         self.record_hotkey = "Ctrl+F8"   # 录制热键
-        self.change_coodr_hotkey = "F2"    # 更改点击坐标热键
+        self.change_coodr_hotkey = "F2"    # 更改点击点击位置热键
         self.retake_image_hotkey = "F4"    # 重新截图热键
-        self.similarity_threshold = 0.8  # 默认相似度阈值
+        self.similarity_threshold = 0.8  # 默认识图阈值阈值
         self.delay_time = 0.1  # 默认延迟时间
         self.loop_count = 1  # 默认循环次数
         self.retry_count = 0 #重新匹配初始计数
@@ -143,6 +156,7 @@ class ImageRecognitionApp:
         self.rc_area_change = False
         self.step_on_search = False
         self.button_pressed = False  # 添加一个标志位来跟踪按钮是否被按下
+        self.need_disable_drag = False
         self.last_area_choice = 'screenshot'
         
         self.DOUBLE_CLICK_THRESHOLD = 0.3
@@ -157,7 +171,9 @@ class ImageRecognitionApp:
         self._scroll_direction = None
         self._scroll_position = (0, 0)  # 记录滚动位置 (x, y)
         self.SCROLL_MERGE_WINDOW = 0.5  # 0.5 秒内合并
-
+        self.last_step_time = None  # 上一个步骤的时间戳
+        self.insert_delay_next = False  # 是否需要插入延迟
+        self.current_delay_num = 1
 
         self.checking_update = False
         self.downloading = False
@@ -209,27 +225,27 @@ class ImageRecognitionApp:
 
         # 图标缓存
         self.icons = {
-            "export": load_icon("export.png"),
-            "import": load_icon("import.png"),
-            "save": load_icon("save.png"),
-            "load": load_icon("load.png"),
-            "add": load_icon("add.png"),
-            "record": load_icon("record.png"),
-            "record_stop": load_icon("record_stop.png"),
-            "start": load_icon("start.png"),
-            "stop": load_icon("stop.png"),
+            "export": load_icon("export.png", self.root),
+            "import": load_icon("import.png", self.root),
+            "save": load_icon("save.png", self.root),
+            "load": load_icon("load.png", self.root),
+            "add": load_icon("add.png", self.root),
+            "record": load_icon("record.png", self.root),
+            "record_stop": load_icon("record_stop.png", self.root),
+            "start": load_icon("start.png", self.root),
+            "stop": load_icon("stop.png", self.root),
         }
 
         self.hover_icons = {
-            "export": load_icon("export_hover.png"),
-            "import": load_icon("import_hover.png"),
-            "save": load_icon("save_hover.png"),
-            "load": load_icon("load_hover.png"),
-            "add": load_icon("add_hover.png"),
-            "record": load_icon("record_hover.png"),
-            "record_stop": load_icon("record_stop_hover.png"),
-            "start": load_icon("start_hover.png"),
-            "stop": load_icon("stop_hover.png"),
+            "export": load_icon("export_hover.png", self.root),
+            "import": load_icon("import_hover.png", self.root),
+            "save": load_icon("save_hover.png", self.root),
+            "load": load_icon("load_hover.png", self.root),
+            "add": load_icon("add_hover.png", self.root),
+            "record": load_icon("record_hover.png", self.root),
+            "record_stop": load_icon("record_stop_hover.png", self.root),
+            "start": load_icon("start_hover.png", self.root),
+            "stop": load_icon("stop_hover.png", self.root),
         }
 
         # 定义鼠标进入和离开的回调函数
@@ -514,7 +530,6 @@ class ImageRecognitionApp:
         )
         search_inner.pack(fill=tk.X, expand=True, padx=border_width, pady=border_width)
 
-        search_var = tk.StringVar()
         # 定义所有状态下的边框颜色为白色
         style.map(
             'White.TEntry',
@@ -535,10 +550,10 @@ class ImageRecognitionApp:
             borderwidth=1               # 边框宽度
         )
         # 创建并应用 Entry
-        search_var = tk.StringVar()
+        self.search_var = tk.StringVar()
         entry = Entry(
             search_inner,
-            textvariable=search_var,
+            textvariable=self.search_var,
             style='White.TEntry',
         )
         entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 0), pady=0)
@@ -554,28 +569,32 @@ class ImageRecognitionApp:
         placeholder_original = "在步骤名称中搜索"
         placeholder = f"{placeholder_original}"  # 统一使用这个变量
 
+        self.search_placeholder_mode = True  # 默认为 placeholder 状态
+
         def set_placeholder():
+            self.search_placeholder_mode = True
             entry.delete(0, tk.END)
             entry.insert(0, placeholder)
             entry.config(foreground='grey')
 
         def clear_placeholder(event=None):
-            if entry.get() == placeholder:
+            if self.search_placeholder_mode:
+                self.search_placeholder_mode = False
                 entry.delete(0, tk.END)
                 entry.config(foreground='black')
 
         def restore_placeholder(event=None):
             if not entry.get():
                 set_placeholder()
-                
+
         def on_search(*args):
-            text = search_var.get().strip()
-            if text == "" or text == placeholder_original:
+            text = self.search_var.get().strip()
+            if self.search_placeholder_mode or text == "":
                 self.step_on_search = True
-                self.update_image_listbox("")  # 显示所有
+                self.refresh_listbox_by_current_filter("")  # 显示所有
             else:
                 self.step_on_search = True
-                self.update_image_listbox(text)
+                self.refresh_listbox_by_current_filter(text)
 
         # 初始化 placeholder
         set_placeholder()
@@ -583,7 +602,7 @@ class ImageRecognitionApp:
         # 事件绑定
         entry.bind("<FocusIn>", clear_placeholder)
         entry.bind("<FocusOut>", restore_placeholder)
-        search_var.trace_add('write', on_search)
+        self.search_var.trace_add('write', on_search)
 
         # 区域B：树形区域
         self.region_b = tb.Frame(self.region_l)
@@ -591,12 +610,12 @@ class ImageRecognitionApp:
 
         # 使用 Treeview 来显示图片和延时ms
         self.tree = ttk.Treeview(self.region_b, columns=(
-            "图片名称", "步骤名称", "相似度", "键盘动作", "点击位置", "延时ms", "条件", 
+            "图片名称", "步骤名称", "识图阈值", "键盘动作", "点击位置", "延时ms", "条件", 
             "需跳转", "状态", "需禁用", "鼠标动作", "条件2", "需跳转2", "需禁用2", "识图区域"
         ), show='headings')#新增索引
         self.tree.heading("图片名称", text="图片名称")
         self.tree.heading("步骤名称", text="步骤名称")
-        self.tree.heading("相似度", text="相似度")
+        self.tree.heading("识图阈值", text="识图阈值")
         self.tree.heading("键盘动作", text="键盘动作")
         self.tree.heading("点击位置", text="点击位置")
         self.tree.heading("延时ms", text="延时ms")
@@ -614,7 +633,7 @@ class ImageRecognitionApp:
         # 设置列宽和对齐方式（居中）
         self.tree.column("图片名称", width=75, anchor='center')
         self.tree.column("步骤名称", width=75, anchor='center')
-        self.tree.column("相似度", width=75, anchor='center')
+        self.tree.column("识图阈值", width=75, anchor='center')
         self.tree.column("键盘动作", width=75, anchor='center')
         self.tree.column("点击位置", width=75, anchor='center')
         self.tree.column("延时ms", width=75, anchor='center')
@@ -780,7 +799,7 @@ class ImageRecognitionApp:
         self.labels = {}         # 右侧：字段值 Label
         self.label_titles = {}   # ✅ 左侧：字段名 Label
 
-        字段名列表 = ["图片名称", "识图区域", "条件判断", "相似度", "点击位置", "键盘动作", "鼠标动作", "状态"]
+        字段名列表 = ["图片名称", "识图阈值", "识图区域", "条件判断", "点击位置", "鼠标动作", "键盘动作", "步骤状态"]
 
         for name in 字段名列表:
             row_frame = tk.Frame(self.labels_frame)
@@ -1437,6 +1456,8 @@ class ImageRecognitionApp:
     ####以上是检测更新的函数
 
     def on_treeview_drag_start(self, event):
+        if self.need_disable_drag:
+            return
         """开始拖动时记录选中的行"""
         item = self.tree.identify_row(event.y)
         if item:
@@ -1512,7 +1533,7 @@ class ImageRecognitionApp:
             self.tree.selection_set(new_item)
             self.dragged_item = new_item  # 更新引用
             self.on_treeview_select(None)
-            self.update_image_listbox()
+            self.refresh_listbox_by_current_filter()
 
         # 最终清理
         self.dragged_item = None
@@ -1612,13 +1633,13 @@ class ImageRecognitionApp:
 
         字段配置 = {
             "图片名称": 0,
+            "识图阈值": 2,
             "识图区域": 14,
             "条件判断": [6, 7, 9, 11, 12, 13],
-            "相似度": 2,
             "点击位置": 4,
-            "键盘动作": 3,
             "鼠标动作": 10,
-            "状态": 8
+            "键盘动作": 3,
+            "步骤状态": 8
         }
 
         for 字段名, 索引 in 字段配置.items():
@@ -1659,11 +1680,11 @@ class ImageRecognitionApp:
                 raw = str(values[索引]).replace("\n", " ").strip()
 
             # 2. 根据字段名渲染
-            if 字段名 == "状态":
+            if 字段名 == "步骤状态":
                 lbl = self.labels[字段名]
                 lbl.config(foreground="red" if raw == "禁用" else "#495057")
 
-            elif 字段名 == "点击位置":
+            if 字段名 == "点击位置":
                 is_dynamic = False  # 默认非动态
 
                 selected_items = self.tree.selection()
@@ -1695,18 +1716,43 @@ class ImageRecognitionApp:
 
                     def on_enter_clickpos(e):
                         font = tkFont.Font(font=e.widget["font"])
-                        text_width = font.measure(disp)  # ✅ 用显示出来的文字
+                        text_width = font.measure(disp)
                         label_width = e.widget.winfo_width()
                         text_right_bound = label_width
-                        text_left_bound = text_right_bound - text_width
+                        text_left_bound = label_width - 2*text_width
+                        # ✅ 仅在鼠标进入时就判断一次位置，避免闪烁
                         if text_left_bound <= e.x <= text_right_bound:
                             提示管理器.显示提示(
                                 e.widget,
-                                "快速修改点击位置\n快捷键：F2"
+                                "快捷键(F2)可更新点击位置为鼠标当前位置"
                             )
 
                     lbl.bind("<Enter>", on_enter_clickpos)
                     lbl.bind("<Leave>", lambda e: 提示管理器.隐藏提示())
+
+            elif 字段名 == "识图阈值":
+                lbl = self.labels[字段名]
+                lbl.unbind("<Enter>")
+                lbl.unbind("<Leave>")
+
+                # 显示完整 raw 内容
+                lbl.config(text=raw, anchor="e", width=0)
+
+                # 如需截断显示，也可加上这一段：
+                disp = 截断文本(raw, max_width, lbl)
+                lbl.config(text=disp, anchor="e", width=0)
+
+                def on_enter_threshold(e):
+                    font = tkFont.Font(font=e.widget["font"])
+                    text_width = font.measure(disp)
+                    label_width = e.widget.winfo_width()
+                    text_right_bound = label_width
+                    text_left_bound = text_right_bound - text_width
+                    if text_left_bound <= e.x <= text_right_bound:
+                        提示管理器.显示提示(e.widget, "范围(0.0 - 1.0)，当阈值设置为“0.0”，表示关闭识图匹配")
+
+                lbl.bind("<Enter>", on_enter_threshold)
+                lbl.bind("<Leave>", lambda e: 提示管理器.隐藏提示())
 
             elif 字段名 == "识图区域":
                 parts = [p.strip() for p in raw.split("|")]
@@ -1817,7 +1863,7 @@ class ImageRecognitionApp:
                 
             keyboard.add_hotkey(self.retake_image_hotkey, retake_image_hotkey_callback)
 
-            # 注册更改点击坐标热键
+            # 注册更改点击点击位置热键
             def change_coodr_hotkey_callback():
                 self.root.after(0, self.get_mouse_position)
                 
@@ -1826,7 +1872,7 @@ class ImageRecognitionApp:
             # 日志记录
             print("-" * 85)
             logging.info("-" * 85)
-            logging.info("程序启动 - 热键注册完成\n开始/停止  F9\n截图  F8\n重新截图  F4\n更改点击坐标  F2")
+            logging.info("程序启动 - 热键注册完成\n开始/停止  F9\n截图  F8\n重新截图  F4\n更改点击点击位置  F2")
             
         except Exception as e:
             print(f"注册热键失败: {e}")
@@ -1847,6 +1893,9 @@ class ImageRecognitionApp:
             logging.error(f"热键注销失败: {e}")
  
     def prepare_capture_screenshot(self, event=None):
+        if self.need_disable_drag:
+            messagebox.showinfo("提示","请先清除搜索框内容！")
+            return
         # 如果 self.top 已存在且窗口未关闭，则直接返回或销毁旧窗口
         if hasattr(self, 'top') and self.top:
             try:
@@ -1903,13 +1952,13 @@ class ImageRecognitionApp:
         # 窗口关闭时清理引用
         self.top.protocol("WM_DELETE_WINDOW", self.cleanup_screenshot_window)
 
-        # 在窗口呈现后，延迟执行一次自动点击
+        # 在窗口呈现后，等待一次自动点击
         self.top.after(100, self._auto_click_current_position)  # 设置延迟 100 毫秒
 
     def _auto_click_current_position(self):
         if not self.is_dragging:
             try:
-                # 获取当前鼠标位置（全局屏幕坐标）
+                # 获取当前鼠标位置（全局屏幕点击位置）
                 x, y = pyautogui.position()
                 # 执行左键点击
                 pyautogui.click(x, y)
@@ -1949,7 +1998,7 @@ class ImageRecognitionApp:
     def on_mouse_drag(self, event):
         self.is_dragging = True
         cur_x, cur_y = event.x, event.y
-        # 更新选框坐标
+        # 更新选框点击位置
         if hasattr(self, 'rect') and self.rect:
             self.canvas.coords(self.rect, self.start_x, self.start_y, cur_x, cur_y)
         # 去掉 update_overlay 调用，不再更新遮罩
@@ -1993,7 +2042,7 @@ class ImageRecognitionApp:
             print("无效截图区域：宽度或高度为 0")
             return
 
-        # 转换为整数（PIL 需要整数坐标）
+        # 转换为整数（PIL 需要整数点击位置）
         bbox = (int(left), int(top), int(right), int(bottom))
 
         # 构造截图区域字符串,“screenshot”为选项默认值
@@ -2017,10 +2066,10 @@ class ImageRecognitionApp:
         screenshot = ImageGrab.grab(bbox)
         screenshot.save(screenshot_path)
 
-        # 计算截图区域的中心坐标
+        # 计算截图区域的中心点击位置
         center_x = (min(self.start_x, end_x) + max(self.start_x, end_x)) // 2
         center_y = (min(self.start_y, end_y) + max(self.start_y, end_y)) // 2
-        mouse_click_coordinates = f"{center_x},{center_y}"  # 使用中心坐标
+        mouse_click_coordinates = f"{center_x},{center_y}"  # 使用中心点击位置
 
         # 更新图像列表
         if self.need_retake_screenshot:
@@ -2077,7 +2126,7 @@ class ImageRecognitionApp:
                 original_area_str = selected_image[14] 
                 # 直接按 "|" 分割成三部分
                 coords, area_choice_value, img_coords = original_area_str.split("|")
-                # 解析步骤图片坐标
+                # 解析步骤图片点击位置
                 l, t, r, b = map(int, img_coords.split(","))   
                 l, t, r, b = img_left, img_top, img_right, img_bottom 
                  # 重新构建识图区域字符串
@@ -2090,7 +2139,7 @@ class ImageRecognitionApp:
                 updated_image = (
                     screenshot_path,          # 0: 新的图片路径
                     selected_image[1],       # 1: 步骤名称
-                    selected_image[2],       # 2: 相似度阈值
+                    selected_image[2],       # 2: 识图阈值阈值
                     selected_image[3],       # 3: 键盘动作
                     mouse_action,            # 4: 更新后的鼠标动作
                     selected_image[5],       # 5: 等待时间
@@ -2156,7 +2205,8 @@ class ImageRecognitionApp:
             else:
                 self.image_list.append((screenshot_path, step_name, 0.8, "", mouse_click_coordinates, 100, "", "", "启用", "", "左键单击 1次", "", "", "", recognition_area))#新增索引
 
-        self.update_image_listbox()  # 更新详细信息
+        self.refresh_listbox_by_current_filter()
+  # 更新详细信息
         self.top.destroy()       # 关闭全屏透明窗口
         self.root.deiconify()  # 重新显示窗口
 
@@ -2217,6 +2267,9 @@ class ImageRecognitionApp:
             return
 
     def toggle_record(self):
+        if self.need_disable_drag:
+            messagebox.showinfo("提示","请先清除搜索框内容！")
+            return
         """切换录制状态"""
         if not hasattr(self, 'is_recording'):
             self.is_recording = False
@@ -2248,6 +2301,9 @@ class ImageRecognitionApp:
         self.is_recording = True
         self.recorded_actions = []
         self.current_step_num = self._get_next_step_number()  # 现在这个方法存在
+        self.last_step_time = None 
+        self.insert_delay_next = False  # 是否需要插入延迟
+        self.current_delay_num = 1
               
         # 只设置鼠标钩子
         self.mouse_listener = mouse.Listener(
@@ -2406,7 +2462,7 @@ class ImageRecognitionApp:
             return
 
         try:
-            direction = 'scrollUp' if dy > 0 else 'scrollDown'
+            direction = 'rc_scrollUp' if dy > 0 else 'rc_scrollDown'
             abs_dy = abs(dy)
 
             now = time.time()
@@ -2462,63 +2518,104 @@ class ImageRecognitionApp:
 
     def _add_single_action_step(self, action):
         """为单个鼠标动作添加步骤，生成标准格式和可读描述"""
-        # 创建独立默认图片路径
-        default_img_path = self._copy_default_img_with_index()
+        now = time.time()  # 当前时间戳
 
-        # 生成步骤名称
+        # 屏幕信息和坐标
+        screen_width, screen_height = pyautogui.size()
+        recognition_area = f"0,0,{screen_width},{screen_height}|screenshot|0,0,{screen_width},{screen_height}"
+        coords = f"{action['x']},{action['y']}"
+
+        # === 插入“等待”步骤（前提是有上一个主步骤） ===
+        if hasattr(self, "last_step_time") and self.last_step_time is not None:
+            wait_time = int((now - self.last_step_time) * 1000)
+            if wait_time >= 1000:
+                if not hasattr(self, "current_delay_num"):
+                    self.current_delay_num = 1
+                delay_step_name = f"等待{self.current_delay_num}"
+                self.current_delay_num += 1
+
+                delay_mouse_action = f"none:{coords}"
+                delay_result = ""
+                delay_img_path = self._copy_default_img_with_index()
+
+                selected = self.tree.selection()
+                if selected:
+                    idx = self.tree.index(selected[0])
+                    insert_index = idx + 1
+                    self.image_list.insert(insert_index, (
+                        delay_img_path, delay_step_name, 0.0, "", delay_mouse_action, wait_time,
+                        "", "", "启用", "", delay_result,
+                        "", "", "", recognition_area
+                    ))
+                else:
+                    insert_index = len(self.image_list)
+                    self.image_list.append((
+                        delay_img_path, delay_step_name, 0.0, "", delay_mouse_action, wait_time,
+                        "", "", "启用", "", delay_result,
+                        "", "", "", recognition_area
+                    ))
+
+                try:
+                    img = Image.open(delay_img_path)
+                    img.thumbnail((50, 50))
+                    photo = ImageTk.PhotoImage(img)
+                    if not hasattr(self.tree, 'image_refs'):
+                        self.tree.image_refs = []
+                    self.tree.image_refs.append(photo)
+
+                    values = (
+                        os.path.basename(delay_img_path), delay_step_name, 0.0, "", coords, wait_time,
+                        "", "", "启用", "", delay_result,
+                        "", "", "", recognition_area
+                    )
+                    item_id = self.tree.insert("", insert_index, values=values, image=photo)
+                    self.tree.selection_set(item_id)
+                    self.tree.focus(item_id)
+                    self.tree.see(item_id)
+                except Exception as e:
+                    print(f"插入延迟步骤出错: {e}")
+
+        # === 插入主步骤 ===
+        default_img_path = self._copy_default_img_with_index()
         step_name = f"步骤{self.current_step_num}"
         self.current_step_num += 1
 
-        # 提取坐标
-        coords = f"{action['x']},{action['y']}"
-        # 设定动态点击标志
         dynamic = "0"
-        # 默认重复次数为 1，滚动类动作将会覆盖它
         count_val = "1"
 
-        # 标准化动作字段
         if action['action'] == 'click':
             action_key = 'click'
         elif action['action'] == 'scroll':
-            action_key = 'scrollUp' if action['direction'] == 'up' else 'scrollDown'
+            action_key = 'rc_scrollUp' if action['direction'] == 'up' else 'rc_scrollDown'
         else:
             action_key = action['action']
 
-        # 如果是 scrollUp / scrollDown，提取滚动次数
-        if action_key in ["scrollUp", "scrollDown"]:
-            count_val = str(action.get('count', 1))  # 支持合并滚动
+        if action_key in ["rc_scrollUp", "rc_scrollDown"]:
+            count_val = str(action.get('count', 1))
 
-        # 生成标准格式
-        if action_key in ["click", "scrollUp", "scrollDown"]:
+        if action_key in ["click", "rc_scrollUp", "rc_scrollDown"]:
             mouse_action = f"{action_key}:{coords}:{dynamic}:{count_val}"
         else:
             mouse_action = f"{action_key}:{coords}:{dynamic}"
 
-        # 动作描述映射
         action_mapping = {
             "click": "左键单击",
             "rightClick": "右键单击",
             "doubleClick": "双击",
             "mouseDown": "按住",
             "mouseUp": "释放",
-            "scrollUp": "向上滚动",
-            "scrollDown": "向下滚动"
+            "rc_scrollUp": "向上滚动",
+            "rc_scrollDown": "向下滚动"
         }
         action_desc = action_mapping.get(action_key, action_key)
         dynamic_desc = " 启用动态点击" if dynamic == "1" else ""
-        unit = "行" if action_key in ["scrollUp", "scrollDown"] else "次"
+        unit = "行" if action_key in ["rc_scrollUp", "rc_scrollDown"] else "次"
 
-        # 生成可读描述
-        if action_key in ["click", "scrollUp", "scrollDown"]:
+        if action_key in ["click", "rc_scrollUp", "rc_scrollDown"]:
             mouse_action_result = f"{action_desc} {count_val}{unit}{dynamic_desc}"
         else:
             mouse_action_result = f"{action_desc}{dynamic_desc}"
 
-        # 识图区域
-        screen_width, screen_height = pyautogui.size()
-        recognition_area = f"0,0,{screen_width},{screen_height}|screenshot|0,0,{screen_width},{screen_height}"
-
-        # 计算插入位置并更新 image_list
         selected = self.tree.selection()
         if selected:
             idx = self.tree.index(selected[0])
@@ -2536,10 +2633,8 @@ class ImageRecognitionApp:
                 "", "", "", recognition_area
             ))
 
-        # 更新配置文件
         self.update_config()
 
-        # 增量插入 TreeView 项目
         try:
             img = Image.open(default_img_path)
             img.thumbnail((50, 50))
@@ -2548,7 +2643,6 @@ class ImageRecognitionApp:
                 self.tree.image_refs = []
             self.tree.image_refs.append(photo)
 
-            coords = mouse_action.split(":")[1] if ":" in mouse_action else mouse_action
             values = (
                 os.path.basename(default_img_path), step_name, 0.0, "", coords, 100,
                 "", "", "启用", "", mouse_action_result,
@@ -2560,8 +2654,20 @@ class ImageRecognitionApp:
             self.tree.see(item_id)
         except Exception as e:
             print(f"插入 Tree 项出错: {e}")
-            
-    def update_image_listbox(self,filter_text=""):
+
+        # 更新上一次操作时间
+        self.last_step_time = now
+
+    def refresh_listbox_by_current_filter(self,filter_text=""):
+        filter_text = self.search_var.get().strip()
+        if getattr(self, "search_placeholder_mode", False) or filter_text == "":
+            self.update_image_listbox("")
+            self.need_disable_drag = False
+        else:
+            self.update_image_listbox(filter_text)
+            self.need_disable_drag = True
+
+    def update_image_listbox(self,filter_text):
         try:   
             # 保存当前预览状态
             current_preview = None
@@ -2575,6 +2681,9 @@ class ImageRecognitionApp:
             # 清空旧的列表项
             for row in self.tree.get_children():
                 self.tree.delete(row)
+
+            # 清空原有映射表
+            self.filtered_index_map = []
 
             # 插入新项，显示图片名称和延时ms
             for index, item in enumerate(self.image_list):
@@ -2617,7 +2726,7 @@ class ImageRecognitionApp:
                         if not step_name or filter_text.lower() not in step_name.lower():
                             continue
 
-                    # 提取坐标部分
+                    # 提取点击位置部分
                     coords = mouse_click_coordinates.split(":")[1] if mouse_click_coordinates and ":" in mouse_click_coordinates else mouse_click_coordinates
 
                     # 加载图像并创建缩略图
@@ -2646,6 +2755,8 @@ class ImageRecognitionApp:
                             #新增索引
                         ), image=photo)
                         self.tree.image_refs.append(photo)  # 保持对图像的引用
+                        # 插入 tree 项后记录原始索引
+                        self.filtered_index_map.append(index)
 
                         # 插入新项后检查status是否为【禁用】
                         if status == "禁用":
@@ -2685,6 +2796,31 @@ class ImageRecognitionApp:
         self.update_config()
         self.step_on_search = False
 
+    def get_selected_original_index(self):
+        """
+        返回当前选中项在原始 image_list 中的索引。
+        若无选中项或索引无效，则返回 None。
+        """
+        selected_items = self.tree.selection()
+        if selected_items:
+            tree_index = self.tree.index(selected_items[0])
+            if hasattr(self, 'filtered_index_map') and 0 <= tree_index < len(self.filtered_index_map):
+                return self.filtered_index_map[tree_index]
+        return None
+
+    def get_selected_original_indices(self):
+        """
+        返回当前所有选中项在原始 image_list 中的索引列表。
+        """
+        indices = []
+        selected_items = self.tree.selection()
+        if hasattr(self, 'filtered_index_map'):
+            for item_id in selected_items:
+                tree_index = self.tree.index(item_id)
+                if 0 <= tree_index < len(self.filtered_index_map):
+                    indices.append(self.filtered_index_map[tree_index])
+        return indices
+
     def update_config(self):
         # 只有在配置文件名非空且文件存在时才执行更新
         if self.config_filename and os.path.exists(self.config_filename) and not self.step_on_search:
@@ -2722,16 +2858,14 @@ class ImageRecognitionApp:
                 return
 
             # 计算索引并倒序删除
-            indices = [self.tree.index(item) for item in selected_items]
-            indices.sort(reverse=True)
+            original_indices = self.get_selected_original_indices()
+            original_indices = [i for i in original_indices if 0 <= i < len(self.image_list)]
+            original_indices.sort(reverse=True)
 
             paths_to_check = []
-            for idx in indices:
-                if 0 <= idx < len(self.image_list):
-                    paths_to_check.append(self.image_list[idx][0])
-                    del self.image_list[idx]
-                else:
-                    logging.warning(f"选中的索引超出范围: {idx}")
+            for idx in original_indices:
+                paths_to_check.append(self.image_list[idx][0])
+                del self.image_list[idx]
 
             # 删除硬盘文件
             for img_path in set(paths_to_check):
@@ -2771,7 +2905,8 @@ class ImageRecognitionApp:
                     self.image_list[i] = tuple(img_list)  # 写回修改后的元组
 
             # 刷新界面
-            self.update_image_listbox()
+            self.refresh_listbox_by_current_filter()
+
             self.load_default_image()
             self.clear_labels()
 
@@ -2787,6 +2922,10 @@ class ImageRecognitionApp:
 
 
     def toggle_script(self):  
+        if self.need_disable_drag:
+            messagebox.showinfo("提示","请先清除搜索框内容！")
+            return
+        
         loop_count_str = self.loop_count_entry.get()
         if not loop_count_str:  # 检查是否为空字符串
             messagebox.showinfo("提示", "请输入循环次数！")
@@ -2804,7 +2943,7 @@ class ImageRecognitionApp:
             if self.from_step:
                 selected_items = self.tree.selection()
                 selected_item = selected_items[0]
-                self.start_step_index = self.tree.index(selected_item)
+                self.start_step_index = self.get_selected_original_index()
             else:
                 self.start_step_index = 0  
             if self.allow_minimize_var.get():  # 检查勾选框状态
@@ -3077,7 +3216,8 @@ class ImageRecognitionApp:
             if selected_index > 0:
                    
                 self.image_list[selected_index], self.image_list[selected_index - 1] = self.image_list[selected_index - 1], self.image_list[selected_index]
-                self.update_image_listbox()
+                self.refresh_listbox_by_current_filter()
+
                    
                 item_id = self.tree.get_children()[selected_index - 1]
                 self.tree.selection_set(item_id)
@@ -3090,7 +3230,8 @@ class ImageRecognitionApp:
             if selected_index < len(self.image_list) - 1:
                    
                 self.image_list[selected_index], self.image_list[selected_index + 1] = self.image_list[selected_index + 1], self.image_list[selected_index]
-                self.update_image_listbox()          
+                self.refresh_listbox_by_current_filter()
+          
                 item_id = self.tree.get_children()[selected_index + 1]
                 self.tree.selection_set(item_id)
                 self.tree.focus(item_id)
@@ -3104,10 +3245,10 @@ class ImageRecognitionApp:
         selected_index = next((i for i, item in enumerate(self.image_list) if item[0] == template_path), None)
         if selected_index is not None:
             current_step = self.image_list[selected_index]
-            mouse_coordinates = current_step[4]  # 获取鼠标坐标
+            mouse_coordinates = current_step[4]  # 获取鼠标点击位置
             keyboard_input = current_step[3]  # 获取键盘输入
             step_name = current_step[1] #获取步骤名称
-            similarity_threshold = float(current_step[2])  # 获取相似度并转为 float
+            similarity_threshold = float(current_step[2])  # 获取识图阈值并转为 float
             minimum_similarity = 0.0
 
             # 从selected_items[14]获取识别范围，并取"|"分隔的第一段
@@ -3137,7 +3278,7 @@ class ImageRecognitionApp:
                     if area_choice_value not in ('fullscreen', 'update'):
                         try:
                             x1, y1, x2, y2 = map(int, recognition_area.split(","))
-                            # 确保坐标在合理范围内
+                            # 确保点击位置在合理范围内
                             x1 = max(0, x1)
                             y1 = max(0, y1)
                             x2 = min(screenshot.shape[1], x2)
@@ -3158,7 +3299,7 @@ class ImageRecognitionApp:
         if max_val < 0:
             max_val = 0
 
-        max_val = round(max_val, 1)   #匹配的最大相似度结果保留1位小数
+        max_val = round(max_val, 1)   #匹配的最大识图阈值结果保留1位小数
 
         if max_val >= similarity_threshold:
 
@@ -3199,7 +3340,8 @@ class ImageRecognitionApp:
                     step_name = new_image[1]
                     self.image_list[selected_index] = tuple(new_image)
                 
-                self.update_image_listbox()
+                self.refresh_listbox_by_current_filter()
+
 
                 print(f"【{step_name}】识图区域更新为({img_area})")
                 logging.info(f"【{step_name}】识图区域更新为({img_area})")
@@ -3243,20 +3385,37 @@ class ImageRecognitionApp:
                                 pyautogui.mouseUp()                
 
                             elif action == "scrollUp":
-                                # 移动到坐标后，再执行滚轮操作
-                                pyautogui.moveTo(x, y)
-                                # 循环 count_val 次，每次滚动 70 行（正值表示向上滚动）
-                                for _ in range(count_val):
-                                    pyautogui.scroll(70, x=x, y=y)
-                            elif action == "scrollDown":
-                                # 移动到坐标后，再执行滚轮操作
+                                notch = 70
+                                # 移动到点击位置后，再执行滚轮操作
                                 pyautogui.moveTo(x, y)
                                 time.sleep(0.1)
-                                # 循环 count_val 次，每次滚动 70 行（调用时转换为负值表示向下滚动）
                                 for _ in range(count_val):
-                                    pyautogui.scroll(-70, x=x, y=y)
+                                    pyautogui.scroll(notch, x=x, y=y)
+                            elif action == "scrollDown":
+                                notch = 70
+                                # 移动到点击位置后，再执行滚轮操作
+                                pyautogui.moveTo(x, y)
+                                time.sleep(0.1)
+                                for _ in range(count_val):
+                                    pyautogui.scroll(-notch, x=x, y=y)
+
+                            elif action == "rc_scrollUp":
+                                notch = 120
+                                # 移动到点击位置后，再执行滚轮操作
+                                pyautogui.moveTo(x, y)
+                                time.sleep(0.1)
+                                for _ in range(count_val):
+                                    pyautogui.scroll(notch, x=x, y=y)
+                            elif action == "rc_scrollDown":
+                                notch = 120
+                                # 移动到点击位置后，再执行滚轮操作
+                                pyautogui.moveTo(x, y)
+                                time.sleep(0.1)
+                                for _ in range(count_val):
+                                    pyautogui.scroll(-notch, x=x, y=y)
+
                     else:
-                        # 处理旧格式的坐标（向后兼容）
+                        # 处理旧格式的点击位置（向后兼容）
                         x, y = map(int, mouse_coordinates.split(','))
                         pyautogui.click(x, y)
                 except Exception as e:
@@ -3304,8 +3463,8 @@ class ImageRecognitionApp:
 
             return True
         else:
-            print(f"【{step_name}】，最大相似度：{max_val:.1f}，期望相似度：{similarity_threshold}，执行重新匹配")
-            logging.info(f"【{step_name}】，最大相似度：{max_val:.1f}，期望相似度：{similarity_threshold}，执行重新匹配")
+            print(f"【{step_name}】，最大识图阈值：{max_val:.1f}，期望识图阈值：{similarity_threshold}，执行重新匹配")
+            logging.info(f"【{step_name}】，最大识图阈值：{max_val:.1f}，期望识图阈值：{similarity_threshold}，执行重新匹配")
             return False
    
     def parse_keyboard_input(self, input_str):
@@ -3372,7 +3531,7 @@ class ImageRecognitionApp:
         selected_items = self.tree.selection()
         if selected_items:
             selected_item = selected_items[0]
-            selected_index = self.tree.index(selected_item)
+            selected_index = self.get_selected_original_index()
             selected_image = self.image_list[selected_index]
 
             # 创建新窗口
@@ -3466,7 +3625,8 @@ class ImageRecognitionApp:
                 tpl = tuple(selected_image)
                 new_image = tpl[:3] + (new_keyboard_input,) + tpl[4:]
                 self.image_list[selected_index] = new_image
-                self.update_image_listbox()
+                self.refresh_listbox_by_current_filter()
+
                 dialog.destroy()
             
             # 添加保存和取消按钮
@@ -3515,7 +3675,7 @@ class ImageRecognitionApp:
             return
 
         selected_item = selected_items[0]
-        selected_index = self.tree.index(selected_item)
+        selected_index = self.get_selected_original_index()
         selected_image = self.image_list[selected_index]
 
         # 创建对话框
@@ -3531,27 +3691,28 @@ class ImageRecognitionApp:
         current_dynamic = False
         current_count = "1"
 
-        if selected_image[4]:  # 如果有现有的鼠标操作数据
+        if selected_image[4]:
             try:
                 parts = selected_image[4].split(":")
-                if len(parts) >= 3:
-                    current_action = parts[0]
-                    current_coords = parts[1]
-                    current_dynamic = parts[2] == "1"
-                    if current_action in ["click", "scrollUp", "scrollDown"] and len(parts) == 4:
-                        current_count = parts[3]
-                if len(parts) >= 2:
-                    current_action = parts[0]
-                    current_coords = parts[1]
-                else:
-                    current_coords = selected_image[4]
+                current_action = parts[0] if len(parts) > 0 else None
+
+                # ✅ 提前统一 action 映射
+                if current_action == "rc_scrollUp":
+                    current_action = "scrollUp"
+                elif current_action == "rc_scrollDown":
+                    current_action = "scrollDown"
+
+                current_coords = parts[1] if len(parts) > 1 else selected_image[4]
+                current_dynamic = parts[2] == "1" if len(parts) > 2 else False
+                current_count = parts[3] if current_action in ["click", "scrollUp", "scrollDown"] and len(parts) > 3 else None
+
             except:
                 pass
-
-        # 创建坐标输入框
+        
+        # 创建点击位置输入框
         coord_frame = tk.Frame(dialog)
         coord_frame.pack(fill=tk.X, pady=5)
-        tk.Label(coord_frame, text="坐标 (x,y):").pack(side=tk.LEFT)
+        tk.Label(coord_frame, text="点击位置:").pack(side=tk.LEFT)
         coord_entry = tk.Entry(coord_frame, width=20)
         coord_entry.insert(0, current_coords)
         coord_entry.pack(side=tk.LEFT, padx=5)
@@ -3651,22 +3812,22 @@ class ImageRecognitionApp:
 
         def save_mouse_action():
             try:
-                # 获取坐标
+                # 获取点击位置
                 coords = coord_entry.get().strip()
-                if not coords or "," not in coords:  # 无操作也需要坐标验证
-                    messagebox.showerror("错误", "请输入有效的坐标 (x,y)", parent=dialog)
+                if not coords or "," not in coords:  # 无操作也需要点击位置验证
+                    messagebox.showerror("错误", "请输入有效的点击位置 (x,y)", parent=dialog)
                     return
                     
                 try:
-                    x, y = map(int, coords.split(","))  # 验证坐标是否为整数
+                    x, y = map(int, coords.split(","))  # 验证点击位置是否为整数
                 except ValueError:
-                    messagebox.showerror("错误", "坐标必须是整数", parent=dialog)
+                    messagebox.showerror("错误", "点击位置必须是整数", parent=dialog)
                     return
 
                 action = action_var.get()
                 
                 if action == "none":
-                    # 无操作模式：只保留坐标
+                    # 无操作模式：只保留点击位置
                     mouse_action = f"{action}:{coords}"
                     mouse_action_result = ""  # 显示为空
                 else:
@@ -3725,7 +3886,8 @@ class ImageRecognitionApp:
                 new_image = tpl[:4] + (mouse_action,) + tpl[5:10] + (mouse_action_result,) + tpl[11:]
                 self.image_list[selected_index] = new_image
 
-                self.update_image_listbox()
+                self.refresh_listbox_by_current_filter()
+
                 dialog.destroy()
 
             except Exception as e:
@@ -3812,7 +3974,7 @@ class ImageRecognitionApp:
             if selected_indices:
                 initial = set(selected_indices)
             else:
-                initial = {self.tree.index(sel) for sel in self.tree.selection()}
+                initial = set(self.get_selected_original_indices())
 
             # 列表框及滚动条
             list_frame = tk.Frame(sel_dialog)
@@ -3934,7 +4096,7 @@ class ImageRecognitionApp:
                     new_info += f":{current_count}"
                 return new_info
 
-            targets = selected_indices or ([self.tree.index(item) for item in self.tree.selection()] if self.tree.selection() else [])
+            targets = selected_indices if selected_indices else self.get_selected_original_indices()
             if not targets:
                 return
 
@@ -3942,7 +4104,7 @@ class ImageRecognitionApp:
                 image = self.image_list[i]
                 new_info = process_mouse_info(image[4])
                 if new_info == "NEGATIVE":
-                    messagebox.showerror("错误", "偏移结果存在负坐标，请重新设置偏移量。")
+                    messagebox.showerror("错误", "偏移结果存在负点击位置，请重新设置偏移量。")
                     return
                 if new_info == "OUT_OF_BOUNDS":
                     messagebox.showerror("错误", f"偏移结果超出屏幕范围({screen_width}x{screen_height})，请重新设置偏移量。")
@@ -3952,10 +4114,11 @@ class ImageRecognitionApp:
                     old_coodr = image[4].split(":")[1] if image[4] and ":" in image[4] else image[4]
                     new_coodr = new_info.split(":")[1] if new_info and ":" in new_info else new_info
                     step_name = image[1]
-                    logging.info(f"【{step_name}】坐标更新：({old_coodr}) → ({new_coodr})")      
-                    print(f"【{step_name}】坐标更新：({old_coodr}) → ({new_coodr})")
+                    logging.info(f"【{step_name}】点击位置更新：({old_coodr}) → ({new_coodr})")      
+                    print(f"【{step_name}】点击位置更新：({old_coodr}) → ({new_coodr})")
 
-            self.update_image_listbox()
+            self.refresh_listbox_by_current_filter()
+
             dialog.destroy()
 
         # 按钮框架
@@ -4296,22 +4459,28 @@ class ImageRecognitionApp:
         self.original_config_files = config_files
 
         def update_listbox(filter_text=""):
+            if filter_text is None:
+                filter_text = getattr(self, "current_filter_text", "")
+            self.current_filter_text = filter_text
             listbox.delete(0, tk.END)
-            for config_file in self.original_config_files:
+            self.filtered_config_indices = []
+            for idx, config_file in enumerate(self.original_config_files):
                 if filter_text.lower() in config_file.lower():
                     display_name = config_file
                     if current_loaded and config_file == current_loaded:
                         display_name = f"{config_file} (当前配置)"
                     listbox.insert(tk.END, display_name)
-            
+                    self.filtered_config_indices.append(idx)
+
             # 滚动到当前配置项（如果存在）
             if current_loaded:
                 for idx in range(listbox.size()):
-                    if current_loaded in listbox.get(idx):  # 检查是否包含当前配置文件名
-                        listbox.see(idx)  # 滚动到该项，但不改变选中状态
+                    if current_loaded in listbox.get(idx):
+                        listbox.see(idx)
                         break
+        self._update_listbox = update_listbox  # 给实例赋值
+        update_listbox()  # 初始化时调用一次
 
-        update_listbox()
         # 绑定双击事件
         # 先定义一个判断点击是否在 item 上的函数（可复用之前的 index_at_event）
         def index_at_event(event):
@@ -4384,15 +4553,23 @@ class ImageRecognitionApp:
         def open_file_location():
             sel = listbox.curselection()
             if sel:
-                selected_index = sel[0]
-                # 这里直接用 original_config_files，因为 listbox 中项与原列表保持同索引
-                selected_file = self.original_config_files[selected_index]
+                idx_in_listbox = sel[0]
+                if not hasattr(self, "filtered_config_indices") or idx_in_listbox >= len(self.filtered_config_indices):
+                    messagebox.showerror("错误", "索引映射错误，无法打开文件位置", parent=dialog)
+                    return
+
+                original_index = self.filtered_config_indices[idx_in_listbox]
+                selected_file = self.original_config_files[original_index]
                 file_path = os.path.join(working_dir, selected_file)
-                subprocess.Popen(f'explorer /select,"{file_path}"', creationflags=subprocess.CREATE_NO_WINDOW)
+
+                try:
+                    subprocess.Popen(f'explorer /select,"{file_path}"', creationflags=subprocess.CREATE_NO_WINDOW)
+                except Exception as e:
+                    messagebox.showerror("错误", f"打开文件位置失败：{str(e)}", parent=dialog)
 
         context_menu.add_command(label="打开文件位置", command=open_file_location)
 
-        # 辅助函数：判断事件坐标是否在某个 item 的 bbox 内
+        # 辅助函数：判断事件点击位置是否在某个 item 的 bbox 内
         def index_at_event(event):
             """
             返回点击位置对应的 index，如果点击在列表项的 bbox 范围内则返回对应 index，否则返回 None。
@@ -4402,7 +4579,7 @@ class ImageRecognitionApp:
             # 获取该 index 的 bbox；如果在可见范围内且 bbox 不为 None
             bbox = listbox.bbox(idx)
             if bbox:
-                x, y, width, height = bbox  # bbox 返回 (x, y, width, height)，其中 y 是相对于 listbox 顶部的纵坐标
+                x, y, width, height = bbox  # bbox 返回 (x, y, width, height)，其中 y 是相对于 listbox 顶部的纵点击位置
                 if y <= event.y <= y + height:
                     return idx
             return None
@@ -4514,56 +4691,47 @@ class ImageRecognitionApp:
     def load_selected_config(self):
         step_count = 0
         global selected_config
-        try:  
+        try:
             if self.import_and_load:
                 selected_config = self.import_config_filename
             if not selected_config and not self.import_and_load:
                 return False
-            # 保存最后使用的配置
+
             self.save_last_used_config(selected_config)
-            # 获取程序工作目录
             working_dir = os.getcwd()
-            # 加载配置文件
             self.config_filename = os.path.join(working_dir, selected_config)
 
             if not os.path.exists(self.config_filename):
                 raise FileNotFoundError(f"配置文件不存在: {self.config_filename}")
 
-            # 先读取配置文件
             with open(self.config_filename, 'r', encoding='utf-8') as f:
-                config = json.load(f)           
+                config = json.load(f)
 
-            # 在应用任何更改之前，先验证所有图像文件
             missing_images = []
             existing_image_paths = set()
-
-            config_basename = Path(self.config_filename).stem  # 不带扩展名
+            config_basename = Path(self.config_filename).stem
             config_folder_dir = Path(self.screenshot_folder) / config_basename
 
-            # 收集存在的图片路径
             for img_data in config.get('image_list', []):
                 image_path = Path(img_data[0])
                 if image_path.exists():
-                    existing_image_paths.add(image_path.resolve())  # 保存绝对路径
+                    existing_image_paths.add(image_path.resolve())
                 else:
                     missing_images.append(str(image_path))
 
-            # 删除 config_folder_dir 中未在 image_list 中的文件
             for file in config_folder_dir.iterdir():
                 if file.is_file() and file.resolve() not in existing_image_paths:
                     file.unlink()
-                    print (f"已删除配置中不存在的图片: {file}")
-                    logging.info (f"已删除配置中不存在的图片: {file}")
+                    print(f"已删除配置中不存在的图片: {file}")
+                    logging.info(f"已删除配置中不存在的图片: {file}")
 
-            # 如果有任何图像文件不存在，清空步骤列表
             if missing_images:
                 error_message = f"配置文件中缺少以下图像文件: {', '.join(missing_images)}"
                 self.clear_list()
                 messagebox.showerror("错误", error_message, parent=self.root)
                 logging.error(error_message)
-                return False                  
+                return False
 
-            # 只有当所有图像文件都存在时，才应用配置
             self.image_list = config.get('image_list', [])
             self.hotkey = config.get('hotkey', '<F9>')
             self.similarity_threshold = config.get('similarity_threshold', 0.8)
@@ -4571,95 +4739,79 @@ class ImageRecognitionApp:
             self.loop_count = config.get('loop_count', 1)
             self.only_keyboard_var.set(config.get('only_keyboard', False))
 
-            # 清空并重新填充 Treeview
+            # 延迟加载弹窗逻辑开始
+            start_time = time.time()
+            dialog_shown = False
+            total = len(self.image_list)
+
             for item in self.tree.get_children():
                 self.tree.delete(item)
-                
-            for i, img_data in enumerate(self.image_list):
-                # 确保每个项目都有全部索引的数量
-                if len(img_data) < 15: #新增索引
-                    img_data += [""] * (15 - len(img_data))
-                    self.image_list[i] = img_data  # 更新原列表中的内容
 
-                # 处理识图区域（img_data[14]）
-                if not img_data[14]:  # 如果为空
-                    # 1. 读取屏幕分辨率备用
+            for i, img_data in enumerate(self.image_list):
+                if not dialog_shown and time.time() - start_time > 0.2:
+                    self.show_loading_dialog()
+                    dialog_shown = True
+
+                if len(img_data) < 15:
+                    img_data += [""] * (15 - len(img_data))
+                    self.image_list[i] = img_data
+
+                if not img_data[14]:
                     screen_w = self.root.winfo_screenwidth()
                     screen_h = self.root.winfo_screenheight()
 
-                    # 2. 尝试从 img_data[0] 路径读取图片分辨率
                     img_path = img_data[0]
                     img_w, img_h = None, None
                     try:
-                        # 如果路径可能相对，你可以根据需要调整基路径
                         if not os.path.isabs(img_path):
-                            # 假设 img_path 相对于当前工作目录，或改为 project 根目录等
                             img_path = os.path.abspath(img_path)
                         with Image.open(img_path) as img:
-                            img_w, img_h = img.size  # 宽度、高度
-                    except Exception as e:
-                        # 读取失败时，使用全屏作为 fallback（或其它默认值）
+                            img_w, img_h = img.size
+                    except Exception:
                         img_w, img_h = screen_w, screen_h
 
-                    # 3. 从 img_data[4] 解析中心点坐标，示例 "click:817,955:0:1"
                     center_x = center_y = None
-                    coord_str = img_data[4]  # 例如 "815,958" 或 "click:817,955:0:1"
+                    coord_str = img_data[4]
                     if ':' in coord_str:
                         parts = coord_str.split(':')
-                        # 期望 parts[1] 是 "817,955"
                         if len(parts) > 1 and ',' in parts[1]:
                             coord_part = parts[1]
                         else:
                             coord_part = coord_str
                     else:
-                        # 没有冒号，直接当成 "x,y"
                         coord_part = coord_str
 
-                    # 解析 coord_part
                     try:
                         cx_str, cy_str = coord_part.split(',')
                         center_x = int(cx_str)
                         center_y = int(cy_str)
-                    except Exception as e:
+                    except Exception:
                         center_x = screen_w // 2
                         center_y = screen_h // 2
 
-                    # 4. 计算包围区域：以图片宽高为尺寸，中心点裁出矩形
                     offset = 20
-
                     half_w = img_w // 2
                     half_h = img_h // 2
-                    left = center_x - half_w - offset
-                    top = center_y - half_h - offset 
-                    right = center_x + half_w + offset
-                    bottom = center_y + half_h + offset
+                    left = max(0, center_x - half_w - offset)
+                    top = max(0, center_y - half_h - offset)
+                    right = min(screen_w, center_x + half_w + offset)
+                    bottom = min(screen_h, center_y + half_h + offset)
 
-                    # 可选：确保不超过屏幕边界
-                    left = max(0, left)
-                    top = max(0, top)
-                    right = min(screen_w, right)
-                    bottom = min(screen_h, bottom)
-
-                    img_coords = f"{left},{top},{right},{bottom}" 
+                    img_coords = f"{left},{top},{right},{bottom}"
                     img_data[14] = f"0,0,{screen_w},{screen_h}|update|{img_coords}"
-                    self.image_list[i] = img_data  # 更新列表
-                    if step_count == 0:
-                        messagebox.showinfo("提示", f"检测到旧版本配置文件\n首次运行步骤将更新识图区域，此时运行速度较慢\n所有步骤更新完识图区域后，运行速度将大幅提升！")
+                    self.image_list[i] = img_data
 
-                # 加载图像并创建缩略图
+                    if step_count == 0:
+                        messagebox.showinfo("提示", "检测到旧版本配置文件\n首次运行步骤将更新识图区域，此时运行速度较慢\n所有步骤更新完识图区域后，运行速度将大幅提升！")
+
                 try:
                     image = Image.open(img_data[0])
                     image.thumbnail((50, 50))
                     photo = ImageTk.PhotoImage(image)
-
-                    # 插入到 Treeview
-                    tree_item = self.tree.insert(
-                        "", 
+                    self.tree.insert(
+                        "",
                         tk.END,
-                        values=(
-                            os.path.basename(img_data[0]),  # 特殊处理的图片名
-                            *img_data[1:]  # 自动包含所有配置字段
-                        ),
+                        values=(os.path.basename(img_data[0]), *img_data[1:]),
                         image=photo
                     )
                     self.tree.image_refs.append(photo)
@@ -4667,39 +4819,104 @@ class ImageRecognitionApp:
                 except Exception as e:
                     print(f"处理图像时出错 {img_data[0]}: {e}")
                     logging.error(f"处理图像时出错 {img_data[0]}: {e}")
-      
-            # 更新循环次数输入框
+
+                if dialog_shown:
+                    percent = ((i + 1) / total) * 100
+                    self.update_progress(percent)
+
             self.loop_count_entry.delete(0, tk.END)
             self.loop_count_entry.insert(0, str(self.loop_count))
             self.config_loaded = True
 
-            # 移动光标到索引 0 的项目
             if self.tree.get_children():
                 first_item_id = self.tree.get_children()[0]
                 self.tree.selection_set(first_item_id)
                 self.tree.focus(first_item_id)
                 self.tree.see(first_item_id)
-            
-            # 取消之前的全局热键， 注册新的全局热键
+
             self.unregister_global_hotkey()
             self.register_global_hotkey()
-            self.update_image_listbox()
-            
+            self.refresh_listbox_by_current_filter()
+
+            if dialog_shown:
+                self.close_loading_dialog()
+
             print(f"已从 {self.config_filename} 加载{step_count}个步骤")
             logging.info(f"已从 {self.config_filename} 加载{step_count}个步骤")
-            
-            # 显示成功消息
-            # messagebox.showinfo("成功", f"配置已成功加载:\n{self.config_filename}", parent=self.root)
+
             self.import_and_load = False
             return True
-            
+
         except Exception as e:
+            try:
+                self.close_loading_dialog()
+            except:
+                pass
             error_message = f"加载配置时出错: {str(e)}"
             print(error_message)
             logging.error(error_message)
             messagebox.showerror("错误", error_message, parent=self.root)
             return False
-        
+
+    def show_loading_dialog(self, title="加载配置"):
+        """创建并显示进度弹窗"""
+        self.loading_dialog = tk.Toplevel(self.root)
+        self.loading_dialog.withdraw()
+        self.loading_dialog.title(title)
+        self.loading_dialog.resizable(False, False)
+        self.loading_dialog.transient(self.root)
+        self.loading_dialog.grab_set()
+
+        # 进度条控件
+        self.progress_var = tk.DoubleVar()
+        progress_bar = ttk.Progressbar(
+            self.loading_dialog,
+            variable=self.progress_var,
+            maximum=100,
+            length=260,
+            mode='determinate'
+        )
+        progress_bar.pack(pady=(20, 5), padx=20)
+
+        # 百分比显示Label
+        self.progress_label = tk.Label(self.loading_dialog, text="0%", font=("微软雅黑", 10))
+        self.progress_label.pack(pady=(0, 10))
+
+        # 更新布局，计算建议大小
+        self.loading_dialog.update_idletasks()
+        req_w = self.loading_dialog.winfo_reqwidth()
+        req_h = self.loading_dialog.winfo_reqheight()
+
+        # 计算居中位置
+        root_x = self.root.winfo_rootx()
+        root_y = self.root.winfo_rooty()
+        root_w = self.root.winfo_width()
+        root_h = self.root.winfo_height()
+
+        pos_x = root_x + (root_w - req_w) // 2
+        pos_y = root_y + (root_h - req_h) // 2
+
+        # 设置窗口大小和位置
+        self.loading_dialog.geometry(f"{req_w}x{req_h}+{pos_x}+{pos_y}")
+
+        self.loading_dialog.deiconify()
+        self.loading_dialog.iconbitmap("icon/app.ico")
+
+        self.loading_dialog.update()
+
+    def update_progress(self, percent):
+        """更新进度条数值和百分比文字"""
+        if hasattr(self, 'progress_var') and hasattr(self, 'progress_label'):
+            self.progress_var.set(percent)
+            self.progress_label.config(text=f"正在加载配置 {percent:.1f}%")
+            self.loading_dialog.update_idletasks()
+
+    def close_loading_dialog(self):
+        """关闭进度弹窗"""
+        if hasattr(self, 'loading_dialog'):
+            self.loading_dialog.destroy()
+            del self.loading_dialog
+
     def export_config(self):
         try:
             # 获取程序工作目录
@@ -4827,25 +5044,28 @@ class ImageRecognitionApp:
             self.original_config_files = config_files
 
             def update_listbox(filter_text=""):
+                if filter_text is None:
+                    filter_text = getattr(self, "current_filter_text", "")
+                self.current_filter_text = filter_text
                 listbox.delete(0, tk.END)
-                for config_file in self.original_config_files:
+                self.filtered_config_indices = []
+                for idx, config_file in enumerate(self.original_config_files):
                     if filter_text.lower() in config_file.lower():
                         display_name = config_file
                         if current_loaded and config_file == current_loaded:
                             display_name = f"{config_file} (当前配置)"
                         listbox.insert(tk.END, display_name)
-                
-                # 聚焦到当前配置项（如果存在）
+                        self.filtered_config_indices.append(idx)
+
+                # 滚动到当前配置项（如果存在）
                 if current_loaded:
                     for idx in range(listbox.size()):
-                        if current_loaded in listbox.get(idx):  # 检查是否包含当前配置文件名
-                            listbox.selection_clear(0, tk.END)  # 清除所有选中项
-                            listbox.selection_set(idx)          # 选中匹配项
-                            listbox.activate(idx)               # 激活该项（光标聚焦）
-                            listbox.see(idx)                    # 确保该项可见（滚动到视图）
+                        if current_loaded in listbox.get(idx):
+                            listbox.see(idx)
                             break
-                        
-            update_listbox()
+            self._update_listbox = update_listbox  # 给实例赋值
+            update_listbox()  # 初始化时调用一次
+
             # 绑定双击事件
             # 先定义一个判断点击是否在 item 上的函数（可复用之前的 index_at_event）
             def index_at_event(event):
@@ -4918,15 +5138,23 @@ class ImageRecognitionApp:
             def open_file_location():
                 sel = listbox.curselection()
                 if sel:
-                    selected_index = sel[0]
-                    # 这里直接用 original_config_files，因为 listbox 中项与原列表保持同索引
-                    selected_file = self.original_config_files[selected_index]
+                    idx_in_listbox = sel[0]
+                    if not hasattr(self, "filtered_config_indices") or idx_in_listbox >= len(self.filtered_config_indices):
+                        messagebox.showerror("错误", "索引映射错误，无法打开文件位置", parent=export_window)
+                        return
+
+                    original_index = self.filtered_config_indices[idx_in_listbox]
+                    selected_file = self.original_config_files[original_index]
                     file_path = os.path.join(working_dir, selected_file)
-                    subprocess.Popen(f'explorer /select,"{file_path}"', creationflags=subprocess.CREATE_NO_WINDOW)
+
+                    try:
+                        subprocess.Popen(f'explorer /select,"{file_path}"', creationflags=subprocess.CREATE_NO_WINDOW)
+                    except Exception as e:
+                        messagebox.showerror("错误", f"打开文件位置失败：{str(e)}", parent=export_window)
 
             context_menu.add_command(label="打开文件位置", command=open_file_location)
 
-            # 辅助函数：判断事件坐标是否在某个 item 的 bbox 内
+            # 辅助函数：判断事件点击位置是否在某个 item 的 bbox 内
             def index_at_event(event):
                 """
                 返回点击位置对应的 index，如果点击在列表项的 bbox 范围内则返回对应 index，否则返回 None。
@@ -4936,7 +5164,7 @@ class ImageRecognitionApp:
                 # 获取该 index 的 bbox；如果在可见范围内且 bbox 不为 None
                 bbox = listbox.bbox(idx)
                 if bbox:
-                    x, y, width, height = bbox  # bbox 返回 (x, y, width, height)，其中 y 是相对于 listbox 顶部的纵坐标
+                    x, y, width, height = bbox  # bbox 返回 (x, y, width, height)，其中 y 是相对于 listbox 顶部的纵点击位置
                     if y <= event.y <= y + height:
                         return idx
                 return None
@@ -5162,7 +5390,13 @@ class ImageRecognitionApp:
             return
 
         idx = selection[0]
-        config_item = listbox.get(idx).replace("(当前配置)", "").strip()
+
+        if not hasattr(self, "filtered_config_indices") or idx >= len(self.filtered_config_indices):
+            messagebox.showerror("错误", "索引映射错误，无法定位配置文件", parent=dialog)
+            return
+
+        original_index = self.filtered_config_indices[idx]
+        config_item = self.original_config_files[original_index]
         config_path = os.path.join(working_dir, config_item)
 
         old_name, ext = os.path.splitext(config_item)
@@ -5175,7 +5409,6 @@ class ImageRecognitionApp:
         x, y, width, height = bbox
         current_value = old_name
 
-        # 如果已有正在编辑的 entry，先销毁它
         if hasattr(self, 'rename_entry') and self.rename_entry:
             try:
                 self.rename_entry.destroy()
@@ -5188,7 +5421,7 @@ class ImageRecognitionApp:
         entry.insert(0, current_value)
         entry.select_range(0, tk.END)
         entry.focus()
-        # 保存当前编辑信息，以便在其他点击时能提交
+
         self.rename_entry = entry
         self.rename_entry_index = idx
         self.rename_old_name = old_name
@@ -5197,11 +5430,9 @@ class ImageRecognitionApp:
         self.rename_working_dir = working_dir
 
         def on_save(event=None):
-            # 如果 entry 已被销毁或不是当前 entry，跳过
             if not hasattr(self, 'rename_entry') or self.rename_entry is None:
                 return
             new_name = entry.get().strip()
-            # 先销毁 entry，避免重复
             entry.destroy()
             self.rename_entry = None
 
@@ -5212,9 +5443,8 @@ class ImageRecognitionApp:
             new_config_path = os.path.join(working_dir, new_config_file)
             new_folder_path = os.path.join(self.screenshot_folder, new_name)
 
-            should_reload_config = False
-            if config_path == self.config_filename:
-                should_reload_config = True
+            # ✅ 判断是否需要重载当前配置
+            should_reload_config = (config_path == self.config_filename)
 
             if os.path.exists(new_config_path):
                 messagebox.showerror("错误", f"配置文件“{new_config_file}”已存在！", parent=dialog)
@@ -5222,92 +5452,97 @@ class ImageRecognitionApp:
 
             try:
                 os.rename(config_path, new_config_path)
-                if os.path.exists(folder_path):
-                    if not os.path.exists(new_folder_path):
-                        os.rename(folder_path, new_folder_path)
-                # 更新配置内容中 paths
+                if os.path.exists(folder_path) and not os.path.exists(new_folder_path):
+                    os.rename(folder_path, new_folder_path)
+
+                # 替换 config 内部截图路径
                 with open(new_config_path, 'r', encoding='utf-8') as f:
                     config_data = json.load(f)
                 if 'image_list' in config_data:
                     for img_data in config_data['image_list']:
                         path = Path(img_data[0])
                         if len(path.parts) >= 3 and path.parts[0] == 'screenshots':
-                            # parts[1] 是旧 config 名称，改为 new_name
                             new_path = Path(path.parts[0]) / new_name / Path(*path.parts[2:])
                             img_data[0] = str(new_path)
                     with open(new_config_path, 'w', encoding='utf-8') as f:
                         json.dump(config_data, f, ensure_ascii=False, indent=2)
-                else:
-                    pass
 
-                # 更新列表和原始列表
-                self.original_config_files[idx] = new_config_file
-                listbox.delete(idx)
-                display_name = new_config_file
+                # ✅ 更新原始配置文件名
+                self.original_config_files[original_index] = new_config_file
 
-                listbox.insert(idx, display_name)
-                listbox.selection_set(idx)
+                # ✅ 刷新列表以保持筛选状态
+                self._update_listbox(self.current_filter_text)
 
+                # ✅ 清空并重载配置
                 if should_reload_config:
-                    self.clear_list()
+                    self.config_filename = new_config_path
+                    self.clear_list()  # 或者 self.load_config_from_file(new_config_path)
 
             except Exception as e:
                 messagebox.showerror("重命名失败", str(e), parent=dialog)
 
-        # 绑定回车保存
+        # 绑定保存事件
         entry.bind('<Return>', on_save)
-        # 绑定焦点丢失保存
         entry.bind('<FocusOut>', on_save)
 
-        # 为了在点击列表其他地方时先提交编辑，给 listbox 绑定一个点击事件
         def commit_rename_on_click(event):
-            # 如果当前有正在编辑的 entry，则先保存它
             if hasattr(self, 'rename_entry') and self.rename_entry:
                 on_save()
-                
+
         listbox.unbind('<Button-1>', None)
         listbox.bind('<Button-1>', commit_rename_on_click, add='+')
 
     def delete_config(self, dialog, listbox, working_dir):
-        """删除选中的配置文件及其关联文件夹"""
         selection = listbox.curselection()
         if not selection:
             messagebox.showwarning("警告", "请先选择一个配置文件", parent=dialog)
             return
-        config_file = listbox.get(selection[0]).replace("(当前配置)", "").strip()
+
+        idx_in_listbox = selection[0]
+
+        if not hasattr(self, "filtered_config_indices") or idx_in_listbox >= len(self.filtered_config_indices):
+            messagebox.showerror("错误", "索引映射错误，无法定位配置文件", parent=dialog)
+            return
+
+        original_index = self.filtered_config_indices[idx_in_listbox]
+        config_file = self.original_config_files[original_index]
+
         last_config_record = self.last_used_config
         config_path = os.path.join(working_dir, config_file)
-        # 获取关联文件夹名称
         folder_name = os.path.splitext(config_file)[0]
         folder_path = os.path.join(self.screenshot_folder, folder_name)
 
-        if config_path == self.config_filename:    
-            # 确认删除
+        if config_path == self.config_filename:
             confirm = messagebox.askokcancel("警告", 
-                                        f"正在加载当前配置，确认删除后，加载的配置将丢失！\n【以下内容将被删除】\n配置文件: {config_file}\n关联文件夹: {folder_name}",
-                                        icon="warning",  # 添加警告图标
-                                        parent=dialog)  
+                                            f"正在加载当前配置，确认删除后，加载的配置将丢失！\n【以下内容将被删除】\n配置文件: {config_file}\n关联文件夹: {folder_name}",
+                                            icon="warning",
+                                            parent=dialog)
         else:
-            # 确认删除
             confirm = messagebox.askyesno("确认删除", 
                                         f"确定要删除以下内容吗？\n配置文件: {config_file}\n关联文件夹: {folder_name}",
                                         parent=dialog)
         if not confirm:
             return    
+
         try:
             if config_path == self.config_filename:
                 self.clear_list()
-            # 删除配置文件
+
             if os.path.exists(config_path):
-                os.remove(config_path)       
-            # 删除关联文件夹（如果存在）
+                os.remove(config_path)
+
             if os.path.exists(folder_path) and os.path.isdir(folder_path):
-                shutil.rmtree(folder_path)  
-            # 清空上一次加载的配置文件记录
+                shutil.rmtree(folder_path)
+
             if os.path.exists(last_config_record):
-                os.remove(last_config_record)       
-            # 从列表框中移除
-            listbox.delete(selection[0])        
+                os.remove(last_config_record)
+
+            # 从原始配置列表删除对应项
+            del self.original_config_files[original_index]
+
+            # 重新更新列表，刷新索引映射
+            self._update_listbox(self.current_filter_text)
+
         except Exception as e:
             messagebox.showerror("错误", f"删除时出错: {str(e)}", parent=dialog)
             logging.error(f"删除配置文件时出错: {str(e)}")
@@ -5316,16 +5551,76 @@ class ImageRecognitionApp:
         """重置程序到初始状态"""
         try:
             # 重置所有变量到初始值
-            self.hotkey = '<F9>'
-            self.similarity_threshold = 0.8
-            self.delay_time = 0.1
-            self.loop_count = 1
-            self.image_list = []
-            self.running = False
-            self.paused = False
-            self.start_step_index = 0
-            self.only_keyboard_var.set(False)
-            self.config_filename = None  
+            self.image_list = []  # 存储 (图像路径, 步骤名称, 识图阈值, 键盘动作, 点击位置, 延时ms, 条件, 需跳转，状态， 需禁用， 鼠标动作， 识图区域)
+            self.screenshot_area = None  # 用于存储截图区域
+            self.rect = None  # 用于存储 Canvas 上的矩形
+            self.start_x = None
+            self.start_y = None
+            self.canvas = None
+            self.running = False  # 控制脚本是否在运行
+            self.thread = None  # 用于保存线程
+            self.hotkey = 'F9'  # 开始/停止热键
+            self.screenshot_hotkey = "F8"    # 截图热键
+            self.record_hotkey = "Ctrl+F8"   # 录制热键
+            self.change_coodr_hotkey = "F2"    # 更改点击点击位置热键
+            self.retake_image_hotkey = "F4"    # 重新截图热键
+            self.similarity_threshold = 0.8  # 默认识图阈值阈值
+            self.delay_time = 0.1  # 默认延迟时间
+            self.loop_count = 1  # 默认循环次数
+            self.retry_count = 0 #重新匹配初始计数
+            self.screenshot_folder = 'screenshots'  # 截图保存文件夹
+            self.last_used_config = "last_config.json"  # 用于存储最后使用的配置文件名
+            self.paused = False  # 控制脚本是否暂停
+            self.copied_item = None
+            self.config_filename = None  # 默认配置文件名
+            self.import_config_filename = None #默认加载配置文件名
+            self.start_step_index = 0  # 初始化
+            self.current_loop = 0 #初始化
+            self.default_photo = None  # 初始化
+            self.current_step_name = None # 初始化
+            self.from_step = False
+            self.need_retake_screenshot = False
+            self.import_and_load = False
+            self.config_loaded = False
+            self.is_cut_mode = False # 用来标记当前操作是剪切而非普通复制
+            self.is_dragging = False
+            self.rc_area_change = False
+            self.step_on_search = False
+            self.button_pressed = False  # 添加一个标志位来跟踪按钮是否被按下
+            self.need_disable_drag = False
+            self.last_area_choice = 'screenshot'
+            
+            self.DOUBLE_CLICK_THRESHOLD = 0.3
+            self._click_timer = None
+            self._click_args = None
+            self._mouse_press_time = None
+            self._mouse_press_pos = None
+            self._mouse_press_button = None
+            self._scroll_timer = None
+            self._scroll_start_time = 0
+            self._scroll_accum = 0
+            self._scroll_direction = None
+            self._scroll_position = (0, 0)  # 记录滚动位置 (x, y)
+            self.SCROLL_MERGE_WINDOW = 0.5  # 0.5 秒内合并
+            self.last_step_time = None  # 上一个步骤的时间戳
+            self.insert_delay_next = False  # 是否需要插入延迟
+            self.current_delay_num = 1
+
+            self.checking_update = False
+            self.downloading = False
+            self.latest_version = ""
+            self.update_available = False
+            self.download_url = ""
+            self.update_window = None
+            self.progress_bar = None
+            self.status_label = None
+            self.update_button = None
+            self.cancel_button = None
+            self.button_frame = None
+
+            self.cut_original_indices = []  # 存放被剪切条目的原始索引
+            self.copied_items = []
+            self.screen_scale = 1
 
             # 清空上一次加载的配置文件记录
             f = open("last_config.json", "w")
@@ -5335,7 +5630,8 @@ class ImageRecognitionApp:
                 os.remove(self.last_used_config)    
                
             # 重置界面元素
-            self.update_image_listbox()
+            self.refresh_listbox_by_current_filter()
+
             self.loop_count_entry.delete(0, tk.END)
             self.loop_count_entry.insert(0, str(self.loop_count))
             self.toggle_run_button.configure(image=self.icons["start"])
@@ -5360,7 +5656,7 @@ class ImageRecognitionApp:
             selected_index = self.tree.index(selected_item[0])
             selected_image = self.image_list[selected_index]
             
-            # 保留原有的鼠标动作设置，只更新坐标部分
+            # 保留原有的鼠标动作设置，只更新点击位置部分
             if selected_image[4] and ":" in selected_image[4]:  # 如果有现有的鼠标动作数据
                 parts = selected_image[4].split(":")
                 action = parts[0]
@@ -5382,11 +5678,12 @@ class ImageRecognitionApp:
             step_name = selected_image[1]
             old_coodr = selected_image[4].split(":")[1] if selected_image[4] and ":" in selected_image[4] else selected_image[4]
             new_coodr = x, y
-            logging.info(f"【{step_name}】坐标更新：({old_coodr}) → {new_coodr}")      
-            print(f"【{step_name}】坐标更新：({old_coodr}) → {new_coodr}")
+            logging.info(f"【{step_name}】点击位置更新：({old_coodr}) → {new_coodr}")      
+            print(f"【{step_name}】点击位置更新：({old_coodr}) → {new_coodr}")
             
-            self.update_image_listbox()
-            messagebox.showinfo("更新坐标", f"坐标已更新为({x}, {y})")
+            self.refresh_listbox_by_current_filter()
+
+            messagebox.showinfo("更新点击位置", f"点击位置已更新为({x}, {y})")
 
         else:
             messagebox.showerror("错误", "请选中1个步骤后重试")
@@ -5475,30 +5772,29 @@ class ImageRecognitionApp:
         self.context_menu.add_command(label="识图区域", command=self.image_rc_area)
         self.context_menu.add_command(label="条件判断", command=self.set_condition_jump)
         self.context_menu.add_separator()
+
+        # 创建“更多选项”子菜单
+        more_menu = tk.Menu(self.context_menu, tearoff=0)
+        more_menu.add_command(label="鼠标动作", command=self.edit_mouse_action)
+        more_menu.add_command(label="键盘动作", command=self.edit_keyboard_input)
+        more_menu.add_command(label="点击偏移", command=self.offset_coords)
+        more_menu.add_command(label="识图阈值", command=self.edit_similarity_threshold)
+        more_menu.add_command(label="延时ms", command=self.edit_wait_time)
+        more_menu.add_command(label="重命名", command=self.edit_step_name)
+
+        # 把子菜单添加到主菜单
+        self.context_menu.add_cascade(label="编辑", menu=more_menu)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="禁用", command=self.toggle_disable_status)  # 菜单索引7
+        self.context_menu.add_command(label="删除", command=self.delete_selected_image)
+        self.context_menu.add_separator()
         self.context_menu.add_command(label="复制", command=self.copy_item)
         self.context_menu.add_command(label="剪切", command=self.cut_item)
         self.context_menu.add_command(label="粘贴", command=self.paste_item)
         self.context_menu.add_separator()
-        self.context_menu.add_command(label="删除", command=self.delete_selected_image)
-        self.context_menu.add_command(label="禁用", command=self.toggle_disable_status)  # 菜单索引10
-        self.context_menu.add_separator()
         self.context_menu.add_command(label="从此步骤运行", command=self.start_from_step)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="打开图片位置", command=self.open_image_location)
-        self.context_menu.add_separator()
-
-        # 创建“更多选项”子菜单
-        more_menu = tk.Menu(self.context_menu, tearoff=0)
-        more_menu.add_command(label="重命名", command=self.edit_step_name)
-        more_menu.add_command(label="延时ms", command=self.edit_wait_time)
-        more_menu.add_command(label="相似度", command=self.edit_similarity_threshold)
-        more_menu.add_command(label="键盘动作", command=self.edit_keyboard_input)
-        more_menu.add_command(label="鼠标动作", command=self.edit_mouse_action)
-        more_menu.add_command(label="偏移坐标", command=self.offset_coords)
-
-        # 把子菜单添加到主菜单
-        self.context_menu.add_cascade(label="更多选项", menu=more_menu)
-
         self.context_menu.add_separator()
         self.context_menu.add_command(label="清空列表", command=self.clear_list)
         self.context_menu.add_separator()
@@ -5513,14 +5809,13 @@ class ImageRecognitionApp:
         self.multi_select_menu.add_command(label="删除", command=self.delete_selected_image)
         self.multi_select_menu.add_separator()
         self.multi_select_menu.add_command(label="识图区域", command=self.image_rc_area)
-        self.multi_select_menu.add_command(label="偏移坐标", command=self.offset_coords)
+        self.multi_select_menu.add_command(label="点击偏移", command=self.offset_coords)
         self.multi_select_menu.add_command(label="更多设置", command=self.more_set)
         self.multi_select_menu.add_separator()
         self.multi_select_menu.add_command(label="清空列表", command=self.clear_list)
         self.multi_select_menu.add_separator()
         self.multi_select_menu.add_command(label="查看日志", command=self.show_logs)
         self.multi_select_menu.add_command(label="检查更新", command=self.check_update)
-
 
     def update_context_menu(self):
         selected = self.tree.selection()
@@ -5536,19 +5831,19 @@ class ImageRecognitionApp:
                     new_cmd = self.Normal_click if similarity > 0 else self.Image_recognition_click
                     self.context_menu.entryconfig(1, label=new_label, command=new_cmd)
                 except ValueError:
-                    print("相似度解析错误")
+                    print("识图阈值解析错误")
             
             # 更新禁用/启用菜单项（基于“状态”列）
             disabled = self.item_is_disabled(selected_item)
             new_disable_label = "启用" if disabled else "禁用"
-            self.context_menu.entryconfig(10, label=new_disable_label, command=self.toggle_disable_status)
+            self.context_menu.entryconfig(7, label=new_disable_label, command=self.toggle_disable_status)
             self.update_label() # 更新详细信息
     
     def toggle_disable_status(self):
         selected = self.tree.selection()
         if selected:
             selected_item = selected[0]
-            selected_index = self.tree.index(selected_item)
+            selected_index = self.get_selected_original_index()
             selected_image = self.image_list[selected_index]  # 获取原始数据
 
             # 切换状态（索引8），保持其他字段不变，且【需禁用】（索引9）不变
@@ -5569,7 +5864,8 @@ class ImageRecognitionApp:
             self.tree.item(selected_item, values=values)
 
             self.update_context_menu()
-            self.update_image_listbox()
+            self.refresh_listbox_by_current_filter()
+
             # —— 强制清除所有选中和焦点 —— 
             self.tree.selection_remove(self.tree.selection())
 
@@ -5585,7 +5881,8 @@ class ImageRecognitionApp:
     
     def toggle_click_label(self):
         self.update_context_menu()  # 右键菜单更新
-        self.update_image_listbox()
+        self.refresh_listbox_by_current_filter()
+
 
     def more_set(self):
         dialog = tk.Toplevel(self.root)
@@ -5599,11 +5896,14 @@ class ImageRecognitionApp:
             return
         
         # 保存选中项的索引、图片数据和Treeview项目ID
+        selected_items = self.tree.selection()
+        original_indices = self.get_selected_original_indices()
         selected_items_indices = []
-        for sel in selected_items:
-            idx = self.tree.index(sel)
-            selected_image = self.image_list[idx]
-            selected_items_indices.append((idx, selected_image, sel))
+
+        for idx, sel in zip(original_indices, selected_items):
+            if 0 <= idx < len(self.image_list):
+                selected_image = self.image_list[idx]
+                selected_items_indices.append((idx, selected_image, sel))
 
         # 状态选项变量
         status_var = tk.StringVar(value="不选择任何选项") # 初始值设为不存在的值
@@ -5626,7 +5926,7 @@ class ImageRecognitionApp:
         tk.Radiobutton(status_frame, text="禁用", variable=status_var, value="禁用").grid(row=0, column=2, padx=5)
 
         # 识图功能区域
-        recognition_frame = tk.LabelFrame(main_frame, text="识图")
+        recognition_frame = tk.LabelFrame(main_frame, text="识图匹配")
         recognition_frame.pack(fill="x", pady=5)
         
         tk.Radiobutton(recognition_frame, text="开启", variable=recognition_var, value="开启").grid(row=0, column=1, padx=(5,20))
@@ -5673,10 +5973,10 @@ class ImageRecognitionApp:
                 # 处理识图设置
                 if recognition_value:
                     if recognition_value == "开启":
-                        new_image[2] = 0.8  # 设置识图相似度为0.8
+                        new_image[2] = 0.8  # 设置识图识图阈值为0.8
 
                     if recognition_value == "关闭":
-                        new_image[2] = 0.0  # 设置普通点击相似度为0.0
+                        new_image[2] = 0.0  # 设置普通点击识图阈值为0.0
 
                         # 检查并修改 parts[2]
                         if new_image[4] and ":" in new_image[4]:
@@ -5755,7 +6055,8 @@ class ImageRecognitionApp:
             # 清除选中状态
             self.tree.selection_remove(self.tree.selection())  
             # 更新列表显示
-            self.update_image_listbox()
+            self.refresh_listbox_by_current_filter()
+
             dialog.destroy()
 
             if skipped_steps:
@@ -5815,7 +6116,7 @@ class ImageRecognitionApp:
 
         try:
             # 获取选中项的索引（假设 tree 的 item ID 与 image_list 索引一致）
-            selected_index = self.tree.index(selected_items[0])
+            selected_index = self.get_selected_original_index()
             img_data = self.image_list[selected_index]
             image_path = img_data[0]  # 图片路径在 img_data[0]
 
@@ -5902,24 +6203,20 @@ class ImageRecognitionApp:
             messagebox.showinfo("提示", "已恢复剪切后未粘贴的步骤，请重新复制")
             return
 
-        selected = self.tree.selection()
-        if not selected:
+        original_indices = self.get_selected_original_indices()
+        if not original_indices:
             return
 
         self.is_cut_mode = False
         self.cut_original_indices = []
         self.copied_items = []
 
-        for sel in selected:
-            idx = self.tree.index(sel)
-            original = self.image_list[idx]
-
-            # 注意：这里只是保存原始引用，用于粘贴时再复制
-            self.copied_items.append(original)
+        for idx in original_indices:
+            if 0 <= idx < len(self.image_list):
+                self.copied_items.append(self.image_list[idx])
 
         print(f"已复制 {len(self.copied_items)} 个项目")
         self.tree.selection_clear()
-        self.tree.selection_remove(self.tree.selection())
      
     def cut_item(self):
         selected = self.tree.selection()
@@ -5931,21 +6228,29 @@ class ImageRecognitionApp:
         self.cut_original_indices.clear()
         self.copied_items.clear()
 
-        # 收集选中项索引并倒序删除
-        indices = sorted((self.tree.index(iid) for iid in selected), reverse=True)
-        for idx in indices:
-            self.cut_original_indices.append(idx)
-            self.copied_items.insert(0, self.image_list.pop(idx))  # 保持顺序
+        # 获取原始索引并倒序排序
+        original_indices = self.get_selected_original_indices()
+        original_indices.sort(reverse=True)
 
-        self.update_image_listbox()
+        for idx in original_indices:
+            if 0 <= idx < len(self.image_list):
+                self.cut_original_indices.insert(0, idx)  # 记录剪切前的原始位置
+                self.copied_items.insert(0, self.image_list.pop(idx))  # 按顺序插入
+
+        self.refresh_listbox_by_current_filter()
         self.clear_labels()
 
-        # —— 强制清除所有选中和焦点 —— 
-        self.tree.selection_remove(self.tree.selection())
+        # 清除所有选中和焦点
+        self.tree.selection_clear()
+        self.tree.focus("")  # 清除焦点（正确方式）
 
         print(f"已剪切 {len(self.copied_items)} 个项目")
 
     def paste_item(self):
+        if self.need_disable_drag:
+            messagebox.showinfo("提示","请先清除搜索框内容！")
+            return
+        
         if not self.copied_items:
             messagebox.showinfo("提示", "没有要粘贴的项目")
             return
@@ -5997,7 +6302,8 @@ class ImageRecognitionApp:
             self.image_list.insert(insert_pos + i, record)
 
         # 刷新界面并聚焦
-        self.update_image_listbox()
+        self.refresh_listbox_by_current_filter()
+
         new_iids = self.tree.get_children()[insert_pos: insert_pos + len(new_records)]
         if new_iids:
             self.tree.selection_set(new_iids)
@@ -6024,7 +6330,8 @@ class ImageRecognitionApp:
             self.image_list.insert(idx, record)
 
         # 刷新列表
-        self.update_image_listbox()
+        self.refresh_listbox_by_current_filter()
+
 
         self.is_cut_mode = False
         self.cut_original_indices.clear()
@@ -6038,17 +6345,17 @@ class ImageRecognitionApp:
             return
 
         selected_item = selected_items[0]
-        selected_index = self.tree.index(selected_item)
+        selected_index = self.get_selected_original_index()
         selected_image = self.image_list[selected_index]
 
         dialog = tk.Toplevel(self.root)
         dialog.withdraw()                     # 先隐藏
-        dialog.title("修改相似度")
+        dialog.title("修改识图阈值")
         dialog.transient(self.root)
         dialog.grab_set()
 
         # 标签和输入框
-        label = tk.Label(dialog, text="请输入新的相似度（0 - 1.0）")
+        label = tk.Label(dialog, text="请输入新的识图阈值（0.0 - 1.0）")
         label.pack(padx=10, pady=10)
         
         entry = tk.Entry(dialog)
@@ -6071,10 +6378,11 @@ class ImageRecognitionApp:
             self.image_list[selected_index] = (
                 selected_image[0],  # 图片路径
                 selected_image[1],  # 步骤名称
-                new_similarity,     # 新的相似度阈值
+                new_similarity,     # 新的识图阈值阈值
                 *selected_image[3:]  # 剩余字段
             )
-            self.update_image_listbox()
+            self.refresh_listbox_by_current_filter()
+
             dialog.destroy()
 
         # 在创建按钮时添加bootstyle参数
@@ -6119,7 +6427,7 @@ class ImageRecognitionApp:
             return
 
         selected_item = selected_items[0]
-        selected_index = self.tree.index(selected_item)
+        selected_index = self.get_selected_original_index()
         selected_image = self.image_list[selected_index]
 
         self.tree.see(selected_item)
@@ -6163,7 +6471,8 @@ class ImageRecognitionApp:
                 all_values[5] = str(new_wait_time)
                 self.tree.item(selected_item, values=all_values)
 
-            self.update_image_listbox()
+            self.refresh_listbox_by_current_filter()
+
             entry.destroy()
 
         entry.bind('<FocusOut>', on_save)
@@ -6185,9 +6494,9 @@ class ImageRecognitionApp:
         selected_items = self.tree.selection()
         if selected_items:
             selected_item = selected_items[0]
-            selected_index = self.tree.index(selected_item)
+            selected_index = self.get_selected_original_index()
             selected_image = self.image_list[selected_index]
-            # 直接将相似度设置为 0
+            # 直接将识图阈值设置为 0
             new_similarity_threshold = 0.0
 
             # 默认使用原来的鼠标动作（如果没有修改）
@@ -6233,7 +6542,7 @@ class ImageRecognitionApp:
             self.image_list[selected_index] = (
                 selected_image[0],  # 图片路径
                 selected_image[1],  # 步骤名称
-                new_similarity_threshold,  # 新的相似度
+                new_similarity_threshold,  # 新的识图阈值
                 selected_image[3],  # 键盘动作
                 new_mouse_action,   # 新的鼠标动作（可能修改或保持原值）
                 *selected_image[5:10],  # 第5到第9个字段（如果有）
@@ -6242,26 +6551,26 @@ class ImageRecognitionApp:
             )
 
             # 更新界面显示
-            self.update_image_listbox()
+            self.refresh_listbox_by_current_filter()
 
     def Image_recognition_click(self):
         selected_items = self.tree.selection()
         if selected_items:
             selected_item = selected_items[0]
-            selected_index = self.tree.index(selected_item)
+            selected_index = self.get_selected_original_index()
             selected_image = self.image_list[selected_index]
-            # 直接将相似度设置为 0.8
+            # 直接将识图阈值设置为 0.8
             new_similarity_threshold = 0.8
-            # 更新 selected_image 中的相似度
+            # 更新 selected_image 中的识图阈值
             self.image_list[selected_index] = (
                 selected_image[0],  # 图片路径（索引 0）
                 selected_image[1],  # 步骤名称（索引 1）
-                new_similarity_threshold,  # 新的相似度（索引 2）
+                new_similarity_threshold,  # 新的识图阈值（索引 2）
                 *selected_image[3:]  # 剩余所有字段
             )
            
             # 更新界面显示
-            self.update_image_listbox()
+            self.refresh_listbox_by_current_filter()
     
     def image_rc_area(self):
         need_disable = False
@@ -6277,13 +6586,16 @@ class ImageRecognitionApp:
         selected_items = self.tree.selection()
         if not selected_items:
             return
-        
+
         selected_items_indices = []
 
-        for sel in selected_items:
-            idx = self.tree.index(sel)
-            selected_image = self.image_list[idx]
-            selected_items_indices.append((idx, selected_image))
+        # 使用已封装的方法获取原始索引
+        original_indices = self.get_selected_original_indices()
+
+        for idx in original_indices:
+            if 0 <= idx < len(self.image_list):
+                selected_image = self.image_list[idx]
+                selected_items_indices.append((idx, selected_image))
 
         if len(selected_items_indices) == 1:
             original_area_str = selected_items_indices[0][1][14]
@@ -6329,7 +6641,7 @@ class ImageRecognitionApp:
                     # 全屏模式: 主区域全屏，步骤图片也全屏
                     new_area_str = f"0,0,{screen_w},{screen_h}|fullscreen|{img_left},{img_top},{img_right},{img_bottom}"
                 elif choice == 'manual':
-                    # 手动模式 - 直接从当前坐标获取
+                    # 手动模式 - 直接从当前点击位置获取
                     l, t, r, b = map(int, coords.split(','))  # 手动范围区域
                     new_area_str = f"{l},{t},{r},{b}|manual|{img_left},{img_top},{img_right},{img_bottom}"
                 else:
@@ -6344,7 +6656,8 @@ class ImageRecognitionApp:
                 print(f"【{step_name}】识图区域更新: ({old_coords}) → ({img_left},{img_top},{img_right},{img_bottom})")
 
             dialog.destroy()
-            self.update_image_listbox()
+            self.refresh_listbox_by_current_filter()
+
 
         def on_cancel():
             dialog.destroy()
@@ -6440,7 +6753,7 @@ class ImageRecognitionApp:
                 if overlay_image_id is not None:
                     canvas.delete(overlay_image_id)
                     overlay_image_id = None
-                # 获取选区坐标
+                # 获取选区点击位置
                 l, t, r, b = map(int, canvas.coords(rect_id))
                 # 创建 RGBA 图像，全图半透明黑
                 mask = Image.new('RGBA', (screen_w, screen_h), (0, 0, 0, 128))
@@ -6510,7 +6823,7 @@ class ImageRecognitionApp:
                 for hid in handle_ids:
                     canvas.delete(hid)
                 handle_ids.clear()
-                # 获取矩形当前坐标
+                # 获取矩形当前点击位置
                 l, t, r, b = canvas.coords(rect_id)
                 # 四边中点 & 四角
                 mid_top    = ((l + r) / 2, t)
@@ -6659,7 +6972,7 @@ class ImageRecognitionApp:
             return
 
         selected_item = selected_items[0]
-        selected_index = self.tree.index(selected_item)
+        selected_index = self.get_selected_original_index()
         selected_image = self.image_list[selected_index]
 
         self.tree.see(selected_item)
@@ -6736,7 +7049,8 @@ class ImageRecognitionApp:
                 all_values[1] = final_name
                 self.tree.item(selected_item, values=all_values)
 
-            self.update_image_listbox()
+            self.refresh_listbox_by_current_filter()
+
             entry.destroy()
 
         # 绑定回车保存
@@ -6749,9 +7063,10 @@ class ImageRecognitionApp:
         if not selected_items:
             messagebox.showwarning("警告", "请先选择一个项目")
             return
+        
+        original_index = self.get_selected_original_index()
 
-        selected_item = selected_items[0]
-        selected_index = self.tree.index(selected_item)
+        selected_index = original_index
         # 复制一份可变的列表用于修改（原先是 tuple）
         selected_image = list(self.image_list[selected_index])
 
@@ -6995,13 +7310,7 @@ class ImageRecognitionApp:
                 # 更新 self.image_list 中的元组
                 self.image_list[selected_index] = tuple(selected_image)
                 # 刷新界面上的列表显示
-                self.update_image_listbox()
-
-                # 重新选中刚才的项目，保持焦点
-                items = self.tree.get_children()
-                if selected_index < len(items):
-                    self.tree.selection_set(items[selected_index])
-                    self.tree.focus(items[selected_index])
+                self.refresh_listbox_by_current_filter()
 
                 logging.info(
                     f"更新条件跳转设置：" 
