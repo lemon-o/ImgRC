@@ -35,7 +35,7 @@ import tkinter.font as tkFont
 from ttkbootstrap.widgets import Entry
 from pynput import mouse
 
-CURRENT_VERSION = "v1.2.1" #版本号
+CURRENT_VERSION = "v1.2.2" #版本号
 
 def run_as_admin():
     if ctypes.windll.shell32.IsUserAnAdmin():
@@ -170,7 +170,7 @@ class ImageRecognitionApp:
         self._scroll_accum = 0
         self._scroll_direction = None
         self._scroll_position = (0, 0)  # 记录滚动位置 (x, y)
-        self.SCROLL_MERGE_WINDOW = 0.5  # 0.5 秒内合并
+        self.SCROLL_MERGE_WINDOW = 1  # 合并指定时间内（单位：秒）内的滚动步骤
         self.last_step_time = None  # 上一个步骤的时间戳
         self.insert_delay_next = False  # 是否需要插入延迟
         self.current_delay_num = 1
@@ -2457,7 +2457,7 @@ class ImageRecognitionApp:
             self._click_args = None
 
     def _on_mouse_scroll(self, x, y, dx, dy):
-        """合并 0.5 秒内的滚轮事件为一条，累计行数"""
+        """合并self.SCROLL_MERGE_WINDOW秒内的滚轮事件为一条，累计行数"""
         if not self.is_recording:
             return
 
@@ -2527,8 +2527,8 @@ class ImageRecognitionApp:
 
         # === 插入“等待”步骤（前提是有上一个主步骤） ===
         if hasattr(self, "last_step_time") and self.last_step_time is not None:
-            wait_time = int((now - self.last_step_time) * 1000)
-            if wait_time >= 1000:
+            wait_time = int((now - self.last_step_time - 0.5) * 1000)
+            if 1000 <= wait_time <= 3000:
                 if not hasattr(self, "current_delay_num"):
                     self.current_delay_num = 1
                 delay_step_name = f"等待{self.current_delay_num}"
@@ -5057,11 +5057,14 @@ class ImageRecognitionApp:
                         listbox.insert(tk.END, display_name)
                         self.filtered_config_indices.append(idx)
 
-                # 滚动到当前配置项（如果存在）
+                # 聚焦到当前配置项（如果存在）
                 if current_loaded:
                     for idx in range(listbox.size()):
-                        if current_loaded in listbox.get(idx):
-                            listbox.see(idx)
+                        if current_loaded in listbox.get(idx):  # 检查是否包含当前配置文件名
+                            listbox.selection_clear(0, tk.END)  # 清除所有选中项
+                            listbox.selection_set(idx)          # 选中匹配项
+                            listbox.activate(idx)               # 激活该项（光标聚焦）
+                            listbox.see(idx)                    # 确保该项可见（滚动到视图）
                             break
             self._update_listbox = update_listbox  # 给实例赋值
             update_listbox()  # 初始化时调用一次
