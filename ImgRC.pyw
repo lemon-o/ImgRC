@@ -35,7 +35,7 @@ import tkinter.font as tkFont
 from ttkbootstrap.widgets import Entry
 from pynput import mouse
 
-CURRENT_VERSION = "v1.2.2" #版本号
+CURRENT_VERSION = "v1.2.3" #版本号
 
 def run_as_admin():
     if ctypes.windll.shell32.IsUserAnAdmin():
@@ -131,7 +131,7 @@ class ImageRecognitionApp:
         self.hotkey = 'F9'  # 开始/停止热键
         self.screenshot_hotkey = "F8"    # 截图热键
         self.record_hotkey = "Ctrl+F8"   # 录制热键
-        self.change_coodr_hotkey = "F2"    # 更改点击点击位置热键
+        self.change_coodr_hotkey = "Ctrl+F2"    # 更改点击点击位置热键
         self.retake_image_hotkey = "F4"    # 重新截图热键
         self.similarity_threshold = 0.8  # 默认识图阈值阈值
         self.delay_time = 0.1  # 默认延迟时间
@@ -1724,7 +1724,7 @@ class ImageRecognitionApp:
                         if text_left_bound <= e.x <= text_right_bound:
                             提示管理器.显示提示(
                                 e.widget,
-                                "快捷键(F2)可更新点击位置为鼠标当前位置"
+                                "快捷键(Ctrl+F2)可更新为鼠标当前位置"
                             )
 
                     lbl.bind("<Enter>", on_enter_clickpos)
@@ -1872,7 +1872,7 @@ class ImageRecognitionApp:
             # 日志记录
             print("-" * 85)
             logging.info("-" * 85)
-            logging.info("程序启动 - 热键注册完成\n开始/停止  F9\n截图  F8\n重新截图  F4\n更改点击点击位置  F2")
+            logging.info("程序启动")
             
         except Exception as e:
             print(f"注册热键失败: {e}")
@@ -2069,7 +2069,7 @@ class ImageRecognitionApp:
         # 计算截图区域的中心点击位置
         center_x = (min(self.start_x, end_x) + max(self.start_x, end_x)) // 2
         center_y = (min(self.start_y, end_y) + max(self.start_y, end_y)) // 2
-        mouse_click_coordinates = f"{center_x},{center_y}"  # 使用中心点击位置
+        mouse_click_coordinates = f"click:{center_x},{center_y}:0:1"
 
         # 更新图像列表
         if self.need_retake_screenshot:
@@ -2555,6 +2555,9 @@ class ImageRecognitionApp:
                         "", "", "", recognition_area
                     ))
 
+                # 将新插入的索引记录到过滤索引列表
+                self.filtered_index_map.append(insert_index)
+
                 try:
                     img = Image.open(delay_img_path)
                     img.thumbnail((50, 50))
@@ -2633,6 +2636,9 @@ class ImageRecognitionApp:
                 "", "", "", recognition_area
             ))
 
+        # 将新插入的索引记录到过滤索引列表
+        self.filtered_index_map.append(insert_index)
+
         self.update_config()
 
         try:
@@ -2652,6 +2658,7 @@ class ImageRecognitionApp:
             self.tree.selection_set(item_id)
             self.tree.focus(item_id)
             self.tree.see(item_id)
+
         except Exception as e:
             print(f"插入 Tree 项出错: {e}")
 
@@ -5565,7 +5572,7 @@ class ImageRecognitionApp:
             self.hotkey = 'F9'  # 开始/停止热键
             self.screenshot_hotkey = "F8"    # 截图热键
             self.record_hotkey = "Ctrl+F8"   # 录制热键
-            self.change_coodr_hotkey = "F2"    # 更改点击点击位置热键
+            self.change_coodr_hotkey = "Ctrl+F2"    # 更改点击点击位置热键
             self.retake_image_hotkey = "F4"    # 重新截图热键
             self.similarity_threshold = 0.8  # 默认识图阈值阈值
             self.delay_time = 0.1  # 默认延迟时间
@@ -6009,8 +6016,8 @@ class ImageRecognitionApp:
                                 else:
                                     new_image.append(mouse_action_result)
 
-                # 当 dynamic_value == "1" 且 new_image[2] == 0 时，跳过并记录
-                if dynamic_value == "1" and new_image[2] == 0:
+                # 当new_image[2] == 0 时，跳过并记录
+                if new_image[2] == 0:
                     skipped_steps.append(new_image[1])  # 记录步骤名称
                     continue  # 跳过后续动态点击逻辑
 
