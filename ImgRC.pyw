@@ -35,7 +35,7 @@ import tkinter.font as tkFont
 from ttkbootstrap.widgets import Entry
 from pynput import mouse
 
-CURRENT_VERSION = "v1.2.3" #版本号
+CURRENT_VERSION = "v1.2.4" #版本号
 
 def run_as_admin():
     if ctypes.windll.shell32.IsUserAnAdmin():
@@ -234,6 +234,7 @@ class ImageRecognitionApp:
             "record_stop": load_icon("record_stop.png", self.root),
             "start": load_icon("start.png", self.root),
             "stop": load_icon("stop.png", self.root),
+            "reset": load_icon("reset.png", self.root),
         }
 
         self.hover_icons = {
@@ -246,6 +247,7 @@ class ImageRecognitionApp:
             "record_stop": load_icon("record_stop_hover.png", self.root),
             "start": load_icon("start_hover.png", self.root),
             "stop": load_icon("stop_hover.png", self.root),
+            "reset": load_icon("reset_hover.png", self.root),
         }
 
         # 定义鼠标进入和离开的回调函数
@@ -1724,7 +1726,7 @@ class ImageRecognitionApp:
                         if text_left_bound <= e.x <= text_right_bound:
                             提示管理器.显示提示(
                                 e.widget,
-                                "快捷键(Ctrl+F2)可更新为鼠标当前位置"
+                                "快捷键(Ctrl+F2)可更新点击位置为鼠标当前位置"
                             )
 
                     lbl.bind("<Enter>", on_enter_clickpos)
@@ -2069,7 +2071,7 @@ class ImageRecognitionApp:
         # 计算截图区域的中心点击位置
         center_x = (min(self.start_x, end_x) + max(self.start_x, end_x)) // 2
         center_y = (min(self.start_y, end_y) + max(self.start_y, end_y)) // 2
-        mouse_click_coordinates = f"click:{center_x},{center_y}:0:1"
+        mouse_click_coordinates = f"click:{center_x},{center_y}:0:1:0,0"
 
         # 更新图像列表
         if self.need_retake_screenshot:
@@ -2114,13 +2116,15 @@ class ImageRecognitionApp:
                     action = parts[0]
                     dynamic = parts[2] if len(parts) > 2 else "0"
                     count = parts[3] if len(parts) > 3 else "1"
+                    # offset_info = "0,0" #重新截图后清除偏移量
+                    offset_info = parts[4] #重新截图后保留偏移量
                     # 重新构建鼠标动作字符串
                     mouse_action = f"{action}:{center_x},{center_y}:{dynamic}"
-                    if action in ["click", "scrollUp", "scrollDown"]:
-                        mouse_action += f":{count}"
+                    mouse_action += f":{count}"
+                    mouse_action += f":{offset_info}"
                 else:
                     # 如果没有鼠标动作数据，使用默认的单击动作
-                    mouse_action = f"click:{center_x},{center_y}:0:1"
+                    mouse_action = f"click:{center_x},{center_y}:0:1:0,0"
 
                 #处理识图区域
                 original_area_str = selected_image[14] 
@@ -2534,7 +2538,7 @@ class ImageRecognitionApp:
                 delay_step_name = f"等待{self.current_delay_num}"
                 self.current_delay_num += 1
 
-                delay_mouse_action = f"none:{coords}"
+                delay_mouse_action = f"none:{coords}:0:1:0,0"
                 delay_result = ""
                 delay_img_path = self._copy_default_img_with_index()
 
@@ -2596,10 +2600,7 @@ class ImageRecognitionApp:
         if action_key in ["rc_scrollUp", "rc_scrollDown"]:
             count_val = str(action.get('count', 1))
 
-        if action_key in ["click", "rc_scrollUp", "rc_scrollDown"]:
-            mouse_action = f"{action_key}:{coords}:{dynamic}:{count_val}"
-        else:
-            mouse_action = f"{action_key}:{coords}:{dynamic}"
+        mouse_action = f"{action_key}:{coords}:{dynamic}:{count_val}:0,0"
 
         action_mapping = {
             "click": "左键单击",
@@ -2734,8 +2735,11 @@ class ImageRecognitionApp:
                             continue
 
                     # 提取点击位置部分
-                    coords = mouse_click_coordinates.split(":")[1] if mouse_click_coordinates and ":" in mouse_click_coordinates else mouse_click_coordinates
-
+                    orig_x, orig_y = map(int, mouse_click_coordinates.split(":")[1].split(","))
+                    off_set_x, off_set_y = map(int, mouse_click_coordinates.split(":")[4].split(","))
+                    click_x = orig_x + off_set_x
+                    click_y = orig_y + off_set_y
+                    click_coords = f"{click_x},{click_y}"
                     # 加载图像并创建缩略图
                     try:
                         image = Image.open(img_path)
@@ -2748,7 +2752,7 @@ class ImageRecognitionApp:
                             step_name, 
                             similarity_threshold, 
                             keyboard_input, 
-                            coords,  # 只显示x,y
+                            click_coords,  # 只显示x,y
                             wait_time,
                             condition,
                             jump_to,
@@ -3364,17 +3368,21 @@ class ImageRecognitionApp:
                         if action == "none":
                             pass  # 不执行任何操作
                         else:
-                            coords = parts[1]
+                            orig_x, orig_y = map(int, mouse_coordinates.split(":")[1].split(","))
+                            off_set_x, off_set_y = map(int, mouse_coordinates.split(":")[4].split(","))
+                            click_x = orig_x + off_set_x
+                            click_y = orig_y + off_set_y
+                            click_coords = f"{click_x},{click_y}"
                             is_dynamic = parts[2]
                             # 对于需要计数的操作（点击、滚轮），解析最后的数字，默认 1
                             count_val = int(parts[3]) if len(parts) > 3 else 1  
 
                             # 计算动态点击的位置
                             if is_dynamic == "1":
-                                x = max_loc[0] + template.shape[1] // 2 + x1
-                                y = max_loc[1] + template.shape[0] // 2 + y1
+                                x = max_loc[0] + template.shape[1] // 2 + x1 + off_set_x
+                                y = max_loc[1] + template.shape[0] // 2 + y1 + off_set_y
                             else:
-                                x, y = map(int, coords.split(","))
+                                x, y = map(int, click_coords.split(","))
 
                             # 执行相应的鼠标操作
                             if action == "click":
@@ -3677,6 +3685,7 @@ class ImageRecognitionApp:
             dialog.iconbitmap("icon/app.ico")
 
     def edit_mouse_action(self):
+        global click_coord
         selected_items = self.tree.selection()
         if not selected_items:
             return
@@ -3695,13 +3704,13 @@ class ImageRecognitionApp:
         # 解析现有的鼠标操作数据
         current_action = "click"
         current_coords = ""
-        current_dynamic = False
+        current_dynamic = "0"
         current_count = "1"
 
         if selected_image[4]:
             try:
                 parts = selected_image[4].split(":")
-                current_action = parts[0] if len(parts) > 0 else None
+                current_action = parts[0] if len(parts) > 0 else "click"
 
                 # ✅ 提前统一 action 映射
                 if current_action == "rc_scrollUp":
@@ -3710,19 +3719,64 @@ class ImageRecognitionApp:
                     current_action = "scrollDown"
 
                 current_coords = parts[1] if len(parts) > 1 else selected_image[4]
-                current_dynamic = parts[2] == "1" if len(parts) > 2 else False
-                current_count = parts[3] if current_action in ["click", "scrollUp", "scrollDown"] and len(parts) > 3 else None
+                current_dynamic = parts[2] == "1" if len(parts) > 2 else "0"
+                current_count = parts[3] if current_action in ["click", "scrollUp", "scrollDown"] and len(parts) > 3 else "1"
+                current_offset_info = parts[4] if len(parts) > 4 else "0,0"
 
             except:
                 pass
+
+        # 字符串转为整数坐标
+        x1, y1 = map(int, current_coords.split(','))
+        dx, dy = map(int, current_offset_info.split(','))
+
+        # 计算偏移后的坐标
+        new_x = x1 + dx
+        new_y = y1 + dy
+        click_coord = f"{new_x},{new_y}"
         
         # 创建点击位置输入框
         coord_frame = tk.Frame(dialog)
         coord_frame.pack(fill=tk.X, pady=5)
+
         tk.Label(coord_frame, text="点击位置:").pack(side=tk.LEFT)
-        coord_entry = tk.Entry(coord_frame, width=20)
-        coord_entry.insert(0, current_coords)
-        coord_entry.pack(side=tk.LEFT, padx=5)
+
+        coord_entry = tb.Entry(coord_frame, width=10)
+        coord_entry.insert(0, click_coord)
+        coord_entry.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 0))
+
+        center_btn = tb.Button(
+            coord_frame,
+            image=self.icons["reset"],
+            command=lambda: clear_offset(),
+            bootstyle="primary-outline"
+        )
+        center_btn.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
+
+        # —— 1) 保存 tooltip 实例
+        center_btn_tooltip = ToolTip(
+            center_btn,
+            f"重置点击位置到步骤图片中心点",
+            self.root
+        )
+
+        # —— 2) 复合绑定：显示 tooltip + 切换图标
+        def _on_center_btn_enter(e):
+            center_btn_tooltip.showtip()
+            on_enter(e, center_btn, self.hover_icons["reset"])
+
+        def _on_center_btn_leave(e):
+            center_btn_tooltip.hidetip()
+            on_leave(e, center_btn, self.icons["reset"])
+
+        center_btn.bind("<Enter>", _on_center_btn_enter)
+        center_btn.bind("<Leave>", _on_center_btn_leave)
+
+        def on_enter(event, button, hover_icon):
+            button.config(image=hover_icon)
+
+        def on_leave(event, button, normal_icon):
+            button.config(image=normal_icon)
 
         # 创建鼠标动作选择框架
         action_frame = tk.LabelFrame(dialog, text="鼠标动作", padx=5, pady=5)
@@ -3802,7 +3856,7 @@ class ImageRecognitionApp:
         # 为动态点击添加tooltip
         dynamic_var_tooltip = ToolTip(
             dynamic_checkbutton,  # 这里改为绑定到Checkbutton部件
-            "开启后将自动追踪图片位置进行点击",
+            "• 开启后将自动追踪步骤图片所在位置进行点击\n• 默认点击位置为步骤图片中心点\n• 设置点击偏移可基于偏移量，偏离步骤图片中心点进行动态点击",
             self.root
         )
 
@@ -3817,10 +3871,49 @@ class ImageRecognitionApp:
         dynamic_checkbutton.bind("<Enter>", _on_loop_enter)
         dynamic_checkbutton.bind("<Leave>", _on_loop_leave)
 
+        def clear_offset():  
+            global click_coord
+            global current_offset_info
+
+            if click_coord == current_coords:
+                messagebox.showerror("重置坐标","点击位置已位于图片中心位置，无需重置！")
+                return
+            
+            else:
+                # 添加二次确认对话框
+                confirm = messagebox.askyesno("确认重置", "确定要将点击位置重置到图片中心点吗？")
+
+                if confirm:  # 如果用户点击"是"
+                    click_coord = current_coords
+                    coords = current_coords
+                    current_offset_info = "0,0"
+                    # 先清空输入框
+                    coord_entry.delete(0, tk.END)  
+                    # 再插入新坐标
+                    coord_entry.insert(0, coords)
+
+                    messagebox.showinfo("重置成功", "点击位置已更新到步骤图片中心点")
+                else:
+                    return
+
         def save_mouse_action():
+            global click_coord
+            global current_offset_info
             try:
                 # 获取点击位置
                 coords = coord_entry.get().strip()
+                if coords != click_coord:
+                    # 字符串转为整数坐标
+                    x2, y2 = map(int, coords.split(','))
+                    dx2, dy2 = map(int, click_coord.split(','))
+
+                    new_x2 = x2 - dx2 + dx
+                    new_y2 = y2 - dy2 + dy
+                    new_offset_info = f"{new_x2},{new_y2}"
+                    offset_info = new_offset_info
+                else:
+                    offset_info = current_offset_info
+                    
                 if not coords or "," not in coords:  # 无操作也需要点击位置验证
                     messagebox.showerror("错误", "请输入有效的点击位置 (x,y)", parent=dialog)
                     return
@@ -3831,11 +3924,11 @@ class ImageRecognitionApp:
                     messagebox.showerror("错误", "点击位置必须是整数", parent=dialog)
                     return
 
+                #获取鼠标动作
                 action = action_var.get()
                 
                 if action == "none":
-                    # 无操作模式：只保留点击位置
-                    mouse_action = f"{action}:{coords}"
+                    mouse_action = f"{action}:{current_coords}:0:1:{offset_info}"
                     mouse_action_result = ""  # 显示为空
                 else:
                     dynamic = "1" if dynamic_var.get() else "0"
@@ -3862,10 +3955,7 @@ class ImageRecognitionApp:
                         return
 
                     # 生成标准格式
-                    if action in ["click", "scrollUp", "scrollDown"]:
-                        mouse_action = f"{action}:{coords}:{dynamic}:{count_val}"
-                    else:
-                        mouse_action = f"{action}:{coords}:{dynamic}"
+                    mouse_action = f"{action}:{current_coords}:{dynamic}:{count_val}:{offset_info}"
 
                     # 生成可读描述
                     action_mapping = {
@@ -3955,7 +4045,7 @@ class ImageRecognitionApp:
 
         # 创建输入框
         input_frame = tk.Frame(dialog)
-        input_frame.pack(pady=10)
+        input_frame.pack(padx=10, pady=10)
 
         tk.Label(input_frame, text="X:").grid(row=0, column=0, padx=(10,0), pady=(20,0), sticky='e')
         x_entry = tk.Entry(input_frame, width=5)
@@ -3982,7 +4072,7 @@ class ImageRecognitionApp:
                 initial = set(selected_indices)
             else:
                 initial = set(self.get_selected_original_indices())
-
+            
             # 列表框及滚动条
             list_frame = tk.Frame(sel_dialog)
             list_frame.pack(padx=10, pady=(10, 0), fill='both', expand=True)
@@ -4006,21 +4096,31 @@ class ImageRecognitionApp:
                 idx = listbox.nearest(event.y)
                 shift_pressed = (event.state & 0x0001) != 0  # 检测是否按住 Shift
 
+                # 如果点击的是初始选中的项目，不允许取消选中
+                if idx in initial:
+                    return "break"
+
                 if shift_pressed and last_click['index'] is not None:
                     # 判断当前点击位置是在初始索引的左边还是右边
                     if idx < last_click['index']:
                         # 只能选择左边（从 idx 到 initial_index）
                         listbox.selection_clear(0, tk.END)  # 先清空所有选择
                         listbox.selection_set(idx, last_click['index'])
+                        # 确保初始选中的项目保持选中
+                        for i in initial:
+                            listbox.selection_set(i)
                     else:
                         # 只能选择右边（从 initial_index 到 idx）
                         listbox.selection_clear(0, tk.END)
                         listbox.selection_set(last_click['index'], idx)
+                        # 确保初始选中的项目保持选中
+                        for i in initial:
+                            listbox.selection_set(i)
                 else:
-                    # 普通点击：切换选中状态
-                    if listbox.selection_includes(idx):
+                    # 普通点击：切换选中状态（但不能取消初始选中的项目）
+                    if listbox.selection_includes(idx) and idx not in initial:
                         listbox.selection_clear(idx)
-                    else:
+                    elif idx not in initial:
                         listbox.selection_set(idx)
                     last_click['index'] = idx  # 更新最后点击的索引
                 return "break"
@@ -4072,35 +4172,286 @@ class ImageRecognitionApp:
             sel_dialog.iconbitmap("icon/app.ico")
             sel_dialog.deiconify()  # 一次性显示在正确位置
 
+        # 自动计算偏移量
+        def auto_offset():
+            # —— 1. 解析原始坐标 —— 
+            target_index = self.get_selected_original_index()
+            if target_index is None:
+                messagebox.showwarning("提示", "请先选中一个步骤再设置偏移！")
+                return
+            
+            mouse_info = self.image_list[target_index][4]
+            if not mouse_info or ":" not in mouse_info:
+                messagebox.showerror("错误", "当前记录没有有效的点击坐标！")
+                return
+            try:
+                orig_x, orig_y = map(int, mouse_info.split(":")[1].split(","))
+                off_set_x, off_set_y = map(int, mouse_info.split(":")[4].split(","))
+                click_x = orig_x + off_set_x
+                click_y = orig_y + off_set_y
+                
+            except:
+                messagebox.showerror("错误", "无法解析点击坐标！")
+                return
+
+            # —— 2. 计算屏幕尺寸和圆半径 —— 
+            screen_width, screen_height = pyautogui.size()
+            diameter = screen_height // 30
+            radius = diameter // 2
+
+            # —— 3. 隐藏主窗口并延迟创建覆盖层 ——
+            self.root.withdraw()  # 隐藏主窗口
+            # 延迟200ms确保主窗口完全隐藏后再创建覆盖层
+            self.root.after(200, lambda: _create_overlay(
+                root=self.root,
+                orig_x=click_x,
+                orig_y=click_y,
+                radius=radius,
+                screen_width=screen_width,
+                screen_height=screen_height,
+                x_entry=x_entry,  # 传入输入框引用
+                y_entry=y_entry   # 传入输入框引用
+            ))
+
+        def _create_overlay(root, orig_x, orig_y, radius, screen_width, screen_height, x_entry, y_entry):
+            # 获取屏幕截图
+            screenshot_img = ImageGrab.grab()
+            screenshot_tk = ImageTk.PhotoImage(screenshot_img)
+            
+            # 创建覆盖层
+            overlay = tk.Toplevel(root)
+            overlay.attributes("-fullscreen", True)
+            overlay.attributes("-topmost", True)
+            overlay.grab_set()
+            
+            # 创建Canvas
+            canvas = tk.Canvas(
+                overlay,
+                width=screen_width,
+                height=screen_height,
+                highlightthickness=0
+            )
+            canvas.pack(fill="both", expand=True)
+            
+            # 显示截图背景
+            canvas.create_image(0, 0, image=screenshot_tk, anchor="nw")
+            
+            # 绘制蓝色圆和十字
+            circle = canvas.create_oval(
+                orig_x-radius, orig_y-radius,
+                orig_x+radius, orig_y+radius,
+                outline="#0773fc", width=2
+            )
+            hline = canvas.create_line(
+                orig_x-radius, orig_y,
+                orig_x+radius, orig_y,
+                fill="#0773fc", width=1
+            )
+            vline = canvas.create_line(
+                orig_x, orig_y-radius,
+                orig_x, orig_y+radius,
+                fill="#0773fc", width=1
+            )
+
+            # 按钮配置
+            btn_size = 20
+            offset = 5  # 距圆形偏移
+            confirm_tag = 'btn_ok'
+            cancel_tag = 'btn_no'
+            items_ok = []
+            items_no = []
+            button_exclusion_areas = []
+
+            # 定义center变量和拖动状态
+            center = {"x": orig_x, "y": orig_y}
+            drag_data = {"x": 0, "y": 0, "dragging": False}
+            overlay_image_id = None
+            mask_tk = None
+
+            def draw_small_btn(x, y, tag, text):
+                bg = canvas.create_rectangle(x, y, x+btn_size, y+btn_size,
+                                            fill='white', outline='black', tags=tag)
+                txt = canvas.create_text(x+btn_size/2, y+btn_size/2,
+                                        text=text, tags=tag)
+                return [bg, txt]
+
+            def place_buttons():
+                # 删除旧按钮
+                for iid in items_ok + items_no:
+                    canvas.delete(iid)
+                items_ok.clear()
+                items_no.clear()
+                
+                # 计算按钮位置（放在圆形正下方）
+                total_width = btn_size * 2 + 10
+                x_base = center["x"] - total_width//2
+                y_base = center["y"] + radius + offset
+                
+                # 确保按钮不会超出屏幕
+                x_base = max(x_base, 0)
+                y_base = min(y_base, screen_height - btn_size)
+                
+                # 绘制按钮
+                items_no.extend(draw_small_btn(x_base, y_base, cancel_tag, 'x'))
+                items_ok.extend(draw_small_btn(x_base + btn_size + 10, y_base, confirm_tag, '√'))
+                
+                # 更新排除区：用于遮罩挖洞
+                button_exclusion_areas.clear()
+                for bg_id in ([items_no[0]] if items_no else []) + ([items_ok[0]] if items_ok else []):
+                    bbox = canvas.bbox(bg_id)
+                    if bbox:
+                        button_exclusion_areas.append(tuple(bbox))
+
+            def create_mask():
+                nonlocal mask_tk
+                # 创建新的遮罩图像
+                mask = Image.new('RGBA', (screen_width, screen_height), (0, 0, 0, 128))
+                draw = ImageDraw.Draw(mask)
+                
+                # 挖空圆形区域
+                l, t, r, b = center["x"]-radius, center["y"]-radius, center["x"]+radius, center["y"]+radius
+                draw.ellipse([l, t, r, b], fill=(0, 0, 0, 0))
+                
+                # 挖空按钮区域
+                for excl in button_exclusion_areas:
+                    ex1, ey1, ex2, ey2 = excl
+                    draw.rectangle([ex1, ey1, ex2, ey2], fill=(0, 0, 0, 0))
+                
+                # 转换为Tkinter图像
+                mask_tk = ImageTk.PhotoImage(mask)
+                return mask_tk
+
+            def show_overlay():
+                nonlocal overlay_image_id
+                if not drag_data["dragging"] and mask_tk:
+                    overlay_image_id = canvas.create_image(0, 0, image=mask_tk, anchor='nw')
+                    overlay._overlay_img = mask_tk  # 保持引用
+                    # 确保圆形和按钮在最上层
+                    canvas.tag_raise(circle)
+                    canvas.tag_raise(hline)
+                    canvas.tag_raise(vline)
+                    for iid in items_no + items_ok:
+                        canvas.tag_raise(iid)
+
+            def hide_overlay():
+                nonlocal overlay_image_id
+                if overlay_image_id is not None:
+                    canvas.delete(overlay_image_id)
+                    overlay_image_id = None
+
+            def update_overlay():
+                create_mask()
+                if drag_data["dragging"]:
+                    hide_overlay()
+                else:
+                    show_overlay()
+
+            # 初始化按钮和遮罩
+            place_buttons()
+            create_mask()
+            show_overlay()
+
+            def on_enter(event):
+                dx, dy = event.x - center["x"], event.y - center["y"]
+                canvas.config(cursor="fleur" if dx*dx+dy*dy <= radius*radius else "")
+
+            def start_drag(event):
+                dx, dy = event.x - center["x"], event.y - center["y"]
+                if dx*dx+dy*dy <= radius*radius:
+                    drag_data["x"], drag_data["y"] = dx, dy
+                    drag_data["dragging"] = True
+                    hide_overlay()
+
+            def do_drag(event):
+                new_x = event.x - drag_data["x"]
+                new_y = event.y - drag_data["y"]
+                dx, dy = new_x - center["x"], new_y - center["y"]
+                
+                # 移动圆形和十字线
+                for item in (circle, hline, vline):
+                    canvas.move(item, dx, dy)
+                
+                center["x"], center["y"] = new_x, new_y
+                
+                # 移动按钮
+                place_buttons()
+                
+                # 更新遮罩但不显示
+                create_mask()
+                
+                # 计算并更新偏移量
+                offset_x = new_x - orig_x
+                offset_y = new_y - orig_y
+                x_entry.delete(0, tk.END)
+                x_entry.insert(0, str(offset_x))
+                y_entry.delete(0, tk.END)
+                y_entry.insert(0, str(offset_y))
+
+            def on_release(event):
+                drag_data["dragging"] = False
+                update_overlay()
+
+            # 修改事件绑定
+            canvas.bind("<Motion>", on_enter)
+            canvas.bind("<ButtonPress-1>", start_drag)
+            canvas.bind("<B1-Motion>", do_drag)
+            canvas.bind("<ButtonRelease-1>", on_release)
+
+            # 按钮事件处理
+            def confirm_and_close():
+                overlay.grab_release()
+                overlay.destroy()
+                root.deiconify()
+
+            def cancel_and_close():
+                x_entry.delete(0, tk.END)
+                x_entry.insert(0, "0")
+                y_entry.delete(0, tk.END)
+                y_entry.insert(0, "0")
+                overlay.grab_release()
+                overlay.destroy()
+                root.deiconify()
+
+            canvas.tag_bind(confirm_tag, "<Button-1>", lambda e: confirm_and_close())
+            canvas.tag_bind(cancel_tag, "<Button-1>", lambda e: cancel_and_close())
+            overlay.bind("<Escape>", lambda e: cancel_and_close())
+
+            # 保存图像引用
+            overlay._screenshot = screenshot_tk
+
+            # 初始更新遮罩
+            create_mask()
+
         def on_save():
             try:
-                offset_x = int(x_entry.get())
-                offset_y = int(y_entry.get())
+                entry_offset_x = int(x_entry.get())
+                entry_offset_y = int(y_entry.get())
             except ValueError:
                 messagebox.showerror("错误", "请输入有效的整数偏移量。")
                 return
 
             def process_mouse_info(mouse_info):
-                current_action, current_coords, current_dynamic, current_count = "click", "", False, "1"
                 if mouse_info:
                     parts = mouse_info.split(":")
-                    if len(parts) >= 3:
+                    if len(parts) >= 5:
                         current_action, current_coords = parts[0], parts[1]
-                        current_dynamic = parts[2] == "1"
-                        if current_action in ["click","scrollUp","scrollDown"] and len(parts) == 4:
-                            current_count = parts[3]
-                    else:
-                        current_coords = mouse_info
+                        current_dynamic = parts[2]
+                        current_count = parts[3]
+                        current_offset_info = parts[4] if len(parts) > 4 else "0,0"
                 try:
                     x, y = map(int, current_coords.split(","))
-                    new_x, new_y = x + offset_x, y + offset_y
+                    off_x, off_y = map(int, current_offset_info.split(","))
+                    new_x, new_y = x + entry_offset_x + off_x, y + entry_offset_y + off_y
                     if new_x < 0 or new_y < 0: return "NEGATIVE"
                     if new_x > screen_width or new_y > screen_height: return "OUT_OF_BOUNDS"
                 except:
                     return None
-                new_info = f"{current_action}:{new_x},{new_y}:{'1' if current_dynamic else '0'}"
-                if current_action in ["click","scrollUp","scrollDown"]:
-                    new_info += f":{current_count}"
+                new_info = f"{current_action}:{current_coords}:{current_dynamic}"
+                new_info += f":{current_count}"
+                new_off_x = entry_offset_x + off_x
+                new_off_y = entry_offset_y + off_y
+                new_offset_info = f"{new_off_x},{new_off_y}"
+                new_info += f":{new_offset_info}"
                 return new_info
 
             targets = selected_indices if selected_indices else self.get_selected_original_indices()
@@ -4118,32 +4469,81 @@ class ImageRecognitionApp:
                     return
                 if new_info:
                     self.image_list[i] = (*image[:4], new_info, *image[5:])
-                    old_coodr = image[4].split(":")[1] if image[4] and ":" in image[4] else image[4]
-                    new_coodr = new_info.split(":")[1] if new_info and ":" in new_info else new_info
+
+                    orig_x, orig_y = map(int, image[4].split(":")[1].split(","))
+                    off_set_x, off_set_y = map(int, image[4].split(":")[4].split(","))
+                    click_x = orig_x + off_set_x
+                    click_y = orig_y + off_set_y
+
+                    parts = new_info.split(":")
+                    current_coords = parts[1]
+                    current_offset_info = parts[4]
+                    # 字符串转为整数坐标
+                    x1, y1 = map(int, current_coords.split(','))
+                    dx, dy = map(int, current_offset_info.split(','))
+
+                    # 计算偏移后的坐标
+                    new_x = x1 + dx
+                    new_y = y1 + dy
+                    new_click_coord = f"{new_x},{new_y}"
+                    click_coord = f"{click_x},{click_y}"
+
+                    old_coodr = click_coord
+                    new_coodr = new_click_coord
                     step_name = image[1]
                     logging.info(f"【{step_name}】点击位置更新：({old_coodr}) → ({new_coodr})")      
                     print(f"【{step_name}】点击位置更新：({old_coodr}) → ({new_coodr})")
 
-            self.refresh_listbox_by_current_filter()
-
             dialog.destroy()
+            self.refresh_listbox_by_current_filter()
 
         # 按钮框架
         btn_frame = tk.Frame(dialog)
-        btn_frame.pack(pady=10)
+        btn_frame.pack(pady=10, fill="x")
 
-        # 第一行：单独一个“应用于更多步骤”按钮
+        btn_frame.columnconfigure(0, weight=1)
+
+        auto_calculate = ttk.Button(
+            btn_frame,
+            text="自动计算偏移量",
+            command=auto_offset,
+            bootstyle="primary-outline"
+        )
+        auto_calculate.grid(row=0, column=0, padx=20, pady=(0, 20), sticky="ew")
+
+        # 为"自动计算偏移量"添加tooltip
+        auto_calculate_tooltip = ToolTip(
+            auto_calculate,  # 这里改为绑定到Checkbutton部件
+            "拖动圆形确定点击位置后将自动计算偏移量",
+            self.root
+        )
+
+        # 显示tooltip的函数
+        def _on_loop_enter(e):
+            auto_calculate_tooltip.showtip()
+
+        def _on_loop_leave(e):
+            auto_calculate_tooltip.hidetip()
+
+        # 绑定事件到Checkbutton部件
+        auto_calculate.bind("<Enter>", _on_loop_enter)
+        auto_calculate.bind("<Leave>", _on_loop_leave)
+
+        # ✅ 添加分隔线（水平线）
+        separator = ttk.Separator(btn_frame, orient="horizontal")
+        separator.grid(row=1, column=0, sticky="ew", padx=5, pady=(0, 15))
+
+        # 应用于更多步骤按钮
         apply_btn = ttk.Button(
             btn_frame,
             text="应用于更多步骤",
-            command=select_steps,  # 你的处理函数
+            command=select_steps,
             bootstyle="primary-outline"
         )
-        apply_btn.grid(row=0, column=0, padx=5, pady=5, sticky="ew")  # 关键：sticky="ew" 让按钮填满宽度
+        apply_btn.grid(row=2, column=0, padx=20, pady=5, sticky="ew")
 
-        # 第二行：一个子Frame，承载“取消”“保存”两个按钮
         sub_frame = tk.Frame(btn_frame)
-        sub_frame.grid(row=1, column=0, pady=5, sticky="ew")  # 关键：sticky="ew" 让子Frame填满宽度
+        sub_frame.grid(row=3, column=0, padx=15, pady=(5,10), sticky="ew")
 
         cancel_btn = ttk.Button(
             sub_frame,
@@ -4151,7 +4551,7 @@ class ImageRecognitionApp:
             command=dialog.destroy,
             bootstyle="primary-outline"
         )
-        cancel_btn.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)  # 关键：expand=True 让按钮平分宽度
+        cancel_btn.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
 
         save_btn = ttk.Button(
             sub_frame,
@@ -4159,10 +4559,13 @@ class ImageRecognitionApp:
             command=on_save,
             bootstyle="primary-outline"
         )
-        save_btn.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)  # 关键：expand=True 让按钮平分宽度
+        save_btn.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
 
-        # 关键：让 btn_frame 的列0自动扩展
-        btn_frame.grid_columnconfigure(0, weight=1)
+        initial = set(self.get_selected_original_indices()) 
+        if len(initial) > 1:
+            auto_calculate["state"] = "disabled"  
+        else:
+            auto_calculate["state"] = "normal"    
 
         # 让 Tkinter 计算理想大小
         dialog.update_idletasks()
@@ -4762,6 +5165,15 @@ class ImageRecognitionApp:
                 if len(img_data) < 15:
                     img_data += [""] * (15 - len(img_data))
                     self.image_list[i] = img_data
+
+                parts = img_data[4].split(":")
+
+                # 如果parts长度不足5（即没有parts[4]），则补充"0,0"
+                if len(parts) < 5:
+                    parts += ["0,0"] * (5 - len(parts))
+
+                img_data[4] = ":".join(parts)
+                self.image_list[i] = img_data
 
                 if not img_data[14]:
                     screen_w = self.root.winfo_screenwidth()
@@ -5659,46 +6071,91 @@ class ImageRecognitionApp:
     def get_mouse_position(self, event=None):
         # 获取当前鼠标位置
         x, y = pyautogui.position()
-    
+        
         # 将鼠标位置存储到当前选中的图像中
         selected_item = self.tree.selection()
         if selected_item:
             selected_index = self.tree.index(selected_item[0])
             selected_image = self.image_list[selected_index]
             
-            # 保留原有的鼠标动作设置，只更新点击位置部分
-            if selected_image[4] and ":" in selected_image[4]:  # 如果有现有的鼠标动作数据
-                parts = selected_image[4].split(":")
-                action = parts[0]
-                dynamic = parts[2] if len(parts) > 2 else "0"
-                count = parts[3] if len(parts) > 3 else "1"
-                # 重新构建鼠标动作字符串
-                mouse_action = f"{action}:{x},{y}:{dynamic}"
-                if action in ["click", "scrollUp", "scrollDown"]:
+            try:
+                # 保留原有的鼠标动作设置，只更新点击位置部分
+                if selected_image[4] and ":" in selected_image[4]:  # 如果有现有的鼠标动作数据
+                    parts = selected_image[4].split(":")
+                    action = parts[0]
+                    current_offset_info = parts[4] if len(parts) > 4 else "0,0"
+                    original_coords = parts[1]
+
+                    # 安全解析原始坐标
+                    if len(parts) > 1 and "," in parts[1]:
+                        original_coords_xy = parts[1].split(",")
+                        org_x, org_y = int(original_coords_xy[0]), int(original_coords_xy[1])
+
+                        off_x, off_y = map(int, current_offset_info.split(","))
+
+                        click_x = org_x + off_x
+                        click_y = org_y + off_y
+                        click_coords = f"{click_x},{click_y}"
+
+                        try:
+                            old_x, old_y = map(int, click_coords.split(","))
+                        except (ValueError, IndexError):
+                            old_x, old_y = x, y  # 如果解析失败，使用当前坐标
+                    else:
+                        old_x, old_y = x, y  # 如果没有坐标数据，使用当前坐标
+                    
+                    dynamic = parts[2] if len(parts) > 2 else "0"
+                    count = parts[3] if len(parts) > 3 else "1"
+                    
+                    # 计算坐标差值
+                    offset_x = x - old_x
+                    offset_y = y - old_y
+
+                    new_offset_x = x - org_x
+                    new_offset_y = y - org_y
+                    
+                    # 重新构建鼠标动作字符串
+                    mouse_action = f"{action}:{original_coords}:{dynamic}"
                     mouse_action += f":{count}"
-            else:
-                # 如果没有鼠标动作数据，使用默认的单击动作
-                mouse_action = f"click:{x},{y}:0:1"
-            
-            tpl = tuple(selected_image)
-            # 修改索引 4：
-            new_image = tpl[:4] + (mouse_action,) + tpl[5:]
-            self.image_list[selected_index] = new_image
+                    # 添加坐标差值
+                    mouse_action += f":{new_offset_x},{new_offset_y}"
+                else:
+                    # 如果没有鼠标动作数据，使用默认的单击动作
+                    mouse_action = f"click:{original_coords}:0:1:0,0"  # 初始差值为0,0
+                    
+                tpl = tuple(selected_image)
+                # 修改索引 4：
+                new_image = tpl[:4] + (mouse_action,) + tpl[5:]
+                self.image_list[selected_index] = new_image
 
-            step_name = selected_image[1]
-            old_coodr = selected_image[4].split(":")[1] if selected_image[4] and ":" in selected_image[4] else selected_image[4]
-            new_coodr = x, y
-            logging.info(f"【{step_name}】点击位置更新：({old_coodr}) → {new_coodr}")      
-            print(f"【{step_name}】点击位置更新：({old_coodr}) → {new_coodr}")
-            
-            self.refresh_listbox_by_current_filter()
+                step_name = selected_image[1]
+                new_coords = f"{x},{y}"
 
-            messagebox.showinfo("更新点击位置", f"点击位置已更新为({x}, {y})")
+                if dynamic == "0":
+                    logging.info(f"【{step_name}】点击位置更新：({click_coords}) → ({new_coords})，X偏移：{offset_x}，Y偏移：{offset_y}")      
+                    print(f"【{step_name}】点击位置更新：({click_coords}) → ({new_coords})，X偏移：{offset_x}，Y偏移：{offset_y}")
+                                
+                    self.refresh_listbox_by_current_filter()
+
+                    messagebox.showinfo("更新点击位置", f"点击位置更新：({click_coords}) → ({new_coords})\nX偏移：{offset_x}\nY偏移：{offset_y}")
+
+                else:
+                    logging.info(f"【{step_name}】检测到动态点击已启用，设置动态点击偏移，X偏移：{offset_x}，Y偏移：{offset_y}")      
+                    print(f"【{step_name}】检测到动态点击已启用，设置动态点击偏移，X偏移：{offset_x}，Y偏移：{offset_y}")
+                                
+                    self.refresh_listbox_by_current_filter()
+
+                    messagebox.showinfo("更新点击位置", f"检测到动态点击已启用，设置动态点击偏移\nX偏移：{offset_x}\nY偏移：{offset_y}")
+
+            except Exception as e:
+                messagebox.showerror("错误", f"更新点击位置时出错：{str(e)}")
+                logging.error(f"更新点击位置时出错：{str(e)}")
+                return
 
         else:
             messagebox.showerror("错误", "请选中1个步骤后重试")
             return
-   
+    
     def cleanup_on_exit(self):
         try:
             # 退出程序时删除未保存的图像
@@ -5893,7 +6350,6 @@ class ImageRecognitionApp:
         self.update_context_menu()  # 右键菜单更新
         self.refresh_listbox_by_current_filter()
 
-
     def more_set(self):
         dialog = tk.Toplevel(self.root)
         dialog.withdraw()
@@ -6016,23 +6472,24 @@ class ImageRecognitionApp:
                                 else:
                                     new_image.append(mouse_action_result)
 
-                # 当new_image[2] == 0 时，跳过并记录
-                if new_image[2] == 0:
-                    skipped_steps.append(new_image[1])  # 记录步骤名称
-                    continue  # 跳过后续动态点击逻辑
-
                 # 处理动态点击
                 if dynamic_value:
+                    # 当new_image[2] == 0 时，跳过并记录
+                    if new_image[2] == 0:
+                        if dynamic_value == "1":
+                            skipped_steps.append(new_image[1])  # 记录步骤名称
+                            continue  # 跳过后续动态点击逻辑
                     if len(new_image) > 4 and new_image[4] and ":" in new_image[4]:
                         parts = new_image[4].split(":")
                         if len(parts) >= 3:
                             action = parts[0]
                             coords = parts[1]
                             count = parts[3] if len(parts) > 3 else "1"
+                            offset_info = parts[4] if len(parts) > 4 else "0,0"
                             # 使用映射后的 dynamic_value
-                            new_mouse_action = f"{action}:{coords}:{dynamic_value}" if dynamic_value else f"{action}:{coords}"
-                            if action in ["click", "scrollUp", "scrollDown"] and dynamic_value:
-                                new_mouse_action += f":{count}"
+                            new_mouse_action = f"{action}:{coords}:{dynamic_value}"
+                            new_mouse_action += f":{count}"
+                            new_mouse_action += f":{offset_info}"
                             new_image[4] = new_mouse_action
 
                             # 生成描述文本
@@ -6522,10 +6979,11 @@ class ImageRecognitionApp:
                     coords = parts[1]
                     count = parts[3] if len(parts) > 3 else "1"
                     dynamic = 0
+                    offset_info = parts[4] if len(parts) > 4 else "0,0"
                     
                     new_mouse_action = f"{action}:{coords}:{dynamic}"
-                    if action in ["click", "scrollUp", "scrollDown"]:
-                        new_mouse_action += f":{count}"
+                    new_mouse_action += f":{count}"
+                    new_mouse_action += f":{offset_info}"
 
                     # 生成可读描述
                     action_mapping = {
@@ -7484,13 +7942,13 @@ class ImageRecognitionApp:
             logging.error(f"跟随步骤出错: {e}")
 
     def show_logs(self):
-        """显示日志窗口（居中于主窗口）"""    
+        """显示日志窗口（居中于主窗口）并实现实时更新"""    
         log_window = tk.Toplevel(self.root)
         log_window.withdraw()                     # 先隐藏
         log_window.title("应用日志")
         log_window.transient(self.root)
         log_window.grab_set()
-      
+    
         # 创建文本框和滚动条
         text_frame = tk.Frame(log_window)
         text_frame.pack(fill=tk.BOTH, expand=True)
@@ -7507,45 +7965,116 @@ class ImageRecognitionApp:
         log_text.pack(fill=tk.BOTH, expand=True)
         scrollbar.config(command=log_text.yview)
         
-        # 读取日志文件内容
-        try:
-            with open('app.log', 'rb') as f:  # 二进制模式
-                content = f.read()
-                try:
-                    log_content = content.decode('utf-8')
-                except UnicodeDecodeError:
-                    log_content = content.decode('gbk', errors='replace')
-            log_text.insert(tk.END, log_content)
-            log_text.see(tk.END)  # 滚动到最后
-        except FileNotFoundError:
-            log_text.insert(tk.END, "日志文件不存在")
-        except Exception as e:
-            log_text.insert(tk.END, f"读取日志失败: {str(e)}")
+        # 添加动态刷新复选框
+        control_frame = tk.Frame(log_window)
+        control_frame.pack(fill=tk.X, padx=5, pady=5)
         
-        # 禁用文本框编辑
-        log_text.config(state=tk.DISABLED)
+        auto_scroll = tk.BooleanVar(value=True)
+        auto_scroll_check = ttk.Checkbutton(
+            control_frame, 
+            text="动态刷新", 
+            variable=auto_scroll
+        )
+        auto_scroll_check.pack(side=tk.LEFT, padx=5)
+        
+        # 状态标签
+        status_label = tk.Label(control_frame, text="状态: 正在监控...")
+        status_label.pack(side=tk.RIGHT, padx=10)
+        
+        # 初始化变量
+        last_size = 0
+        last_position = 0
+        
+        # 鼠标滚轮事件处理
+        def on_mousewheel(event):
+            """鼠标滚轮滚动时立即取消动态刷新"""
+            auto_scroll.set(False)
+            # 允许事件继续传递执行默认滚动
+            return "continue"
+        
+        # 绑定鼠标滚轮事件
+        log_text.bind("<MouseWheel>", on_mousewheel)  # Windows
+        
+        def update_log(full_refresh=False):
+            nonlocal last_size, last_position
+            try:
+                with open('app.log', 'rb') as f:
+                    if not full_refresh and os.path.exists('app.log'):
+                        current_size = os.path.getsize('app.log')
+                        if current_size < last_size:
+                            # 文件被清空或截断的情况
+                            full_refresh = True
+                            last_position = 0
+                    
+                    if full_refresh:
+                        # 全量刷新
+                        f.seek(0)
+                        content = f.read()
+                        last_position = f.tell()
+                        log_text.config(state=tk.NORMAL)
+                        log_text.delete(1.0, tk.END)
+                        try:
+                            log_content = content.decode('utf-8')
+                        except UnicodeDecodeError:
+                            log_content = content.decode('gbk', errors='replace')
+                        log_text.insert(tk.END, log_content)
+                        log_text.config(state=tk.DISABLED)
+                    else:
+                        # 增量刷新
+                        f.seek(last_position)
+                        content = f.read()
+                        if content:
+                            last_position = f.tell()
+                            log_text.config(state=tk.NORMAL)
+                            try:
+                                new_content = content.decode('utf-8')
+                            except UnicodeDecodeError:
+                                new_content = content.decode('gbk', errors='replace')
+                            log_text.insert(tk.END, new_content)
+                            log_text.config(state=tk.DISABLED)
+                    
+                    last_size = os.path.getsize('app.log') if os.path.exists('app.log') else 0
+                    
+                    if auto_scroll.get():
+                        log_text.see(tk.END)  # 动态刷新到最后
+                    
+                    status_label.config(text="状态: 正常", fg="green")
+                    
+            except FileNotFoundError:
+                status_label.config(text="状态: 文件不存在", fg="red")
+            except Exception as e:
+                status_label.config(text=f"状态: 错误 - {str(e)}", fg="red")
+        
+        def check_for_updates():
+            update_log()
+            log_window.after(10, check_for_updates)
+        
+        # 初始加载日志
+        update_log(full_refresh=True)
+        
+        # 启动定时检查
+        log_window.after(10, check_for_updates)
+        
+        # 窗口关闭时停止定时器
+        def on_close():
+            log_window.destroy()
+        
+        log_window.protocol("WM_DELETE_WINDOW", on_close)
 
-        # 让 Tkinter 计算“理想”大小
+        # 窗口布局和居中逻辑（保持不变）
         log_window.update_idletasks()
         req_w = log_window.winfo_reqwidth()
         req_h = log_window.winfo_reqheight()
 
-        # 目标比例 4:3
         ratio_w, ratio_h = 4, 3
-
-        # 方案 A：以理想宽度 req_w 为基准，计算对应的高度
         h_based_on_w = int(req_w * ratio_h / ratio_w)
-        # 方案 B：以理想高度 req_h 为基准，计算对应的宽度
         w_based_on_h = int(req_h * ratio_w / ratio_h)
 
-        # 选择能包下所有控件的最小方案
-        # 如果 h_based_on_w >= req_h，就用 (req_w, h_based_on_w)，否则用 (w_based_on_h, req_h)
         if h_based_on_w >= req_h:
             new_w, new_h = req_w, h_based_on_w
         else:
             new_w, new_h = w_based_on_h, req_h
 
-        # 计算居中位置
         main_x = self.root.winfo_x()
         main_y = self.root.winfo_y()
         main_w = self.root.winfo_width()
@@ -7553,12 +8082,9 @@ class ImageRecognitionApp:
         x = main_x + (main_w - new_w) // 2
         y = main_y + (main_h - new_h) // 2
 
-        # 一次性设置大小（强制 4:3）和位置，并显示
         log_window.geometry(f"{new_w}x{new_h}+{x}+{y}")
         log_window.deiconify()
-
         log_window.iconbitmap("icon/app.ico")
-
 
 if __name__ == "__main__":
     root = tk.Tk()
