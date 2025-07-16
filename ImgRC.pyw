@@ -34,6 +34,7 @@ from packaging import version
 import tkinter.font as tkFont
 from ttkbootstrap.widgets import Entry
 from pynput import mouse
+from pynput.mouse import Button, Controller
 
 CURRENT_VERSION = "v1.2.5" #版本号
 
@@ -192,6 +193,11 @@ class ImageRecognitionApp:
         self.screen_scale = 1
         self.follow_current_step = tk.BooleanVar(value=False)  # 控制是否跟随当前步骤
         self.only_keyboard_var = tk.BooleanVar(value=False)  # 控制是否只进行键盘操作
+
+        # 获取屏幕宽高（Win32 API）
+        self.screen_width = ctypes.windll.user32.GetSystemMetrics(0)
+        self.screen_height = ctypes.windll.user32.GetSystemMetrics(1)
+
         # 先隐藏窗口
         root.withdraw()
         self.init_ui()
@@ -3246,7 +3252,35 @@ class ImageRecognitionApp:
                 item_id = self.tree.get_children()[selected_index + 1]
                 self.tree.selection_set(item_id)
                 self.tree.focus(item_id)
-   
+
+    # ========== Win32 API 点击相关函数 ==========
+    def to_absolute(self, x, y):
+        abs_x = int(x * 65535 / self.screen_width)
+        abs_y = int(y * 65535 / self.screen_height)
+        return abs_x, abs_y
+
+    #左键单击
+    def win32_click(self, x, y):
+        abs_x, abs_y = self.to_absolute(x, y)
+        ctypes.windll.user32.mouse_event(0x0001 | 0x8000, abs_x, abs_y, 0, 0)  # MOUSEEVENTF_MOVE | ABSOLUTE
+        time.sleep(0.01)
+        ctypes.windll.user32.mouse_event(0x0002, abs_x, abs_y, 0, 0)  # LEFTDOWN
+        time.sleep(0.01)
+        ctypes.windll.user32.mouse_event(0x0004, abs_x, abs_y, 0, 0)  # LEFTUP
+
+    #左键双击
+    def win32_double_click(self, x, y):
+        abs_x, abs_y = self.to_absolute(x, y)
+        ctypes.windll.user32.mouse_event(0x0001 | 0x8000, abs_x, abs_y, 0, 0)  # MOUSEEVENTF_MOVE | ABSOLUTE
+        time.sleep(0.01)
+        ctypes.windll.user32.mouse_event(0x0002, abs_x, abs_y, 0, 0)  # LEFTDOWN
+        time.sleep(0.01)
+        ctypes.windll.user32.mouse_event(0x0004, abs_x, abs_y, 0, 0)  # LEFTUP
+        time.sleep(0.01)
+        ctypes.windll.user32.mouse_event(0x0002, abs_x, abs_y, 0, 0)  # LEFTDOWN
+        time.sleep(0.01)
+        ctypes.windll.user32.mouse_event(0x0004, abs_x, abs_y, 0, 0)  # LEFTUP
+ 
     def match_and_click(self, template_path, similarity_threshold):
         screen_w = self.root.winfo_screenwidth()
         screen_h = self.root.winfo_screenheight()
@@ -3387,11 +3421,15 @@ class ImageRecognitionApp:
                             # 执行相应的鼠标操作
                             if action == "click":
                                 for _ in range(count_val):
-                                    pyautogui.click(x, y)
+                                    
+                                    self.win32_click(x, y) #Windows底层点击方法，兼具速度和稳定
+
                             elif action == "rightClick":
                                 pyautogui.rightClick(x, y)
+
                             elif action == "doubleClick":
-                                pyautogui.doubleClick(x, y)
+                                self.win32_double_click(x, y)
+
                             elif action == "mouseDown":
                                 pyautogui.moveTo(x, y)
                                 pyautogui.mouseDown()
