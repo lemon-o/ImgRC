@@ -35,7 +35,7 @@ import tkinter.font as tkFont
 from ttkbootstrap.widgets import Entry
 from pynput import mouse
 
-CURRENT_VERSION = "v1.2.4" #版本号
+CURRENT_VERSION = "v1.2.5" #版本号
 
 def run_as_admin():
     if ctypes.windll.shell32.IsUserAnAdmin():
@@ -3686,6 +3686,7 @@ class ImageRecognitionApp:
 
     def edit_mouse_action(self):
         global click_coord
+        global current_offset_info
         selected_items = self.tree.selection()
         if not selected_items:
             return
