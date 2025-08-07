@@ -36,7 +36,7 @@ from ttkbootstrap.widgets import Entry
 from pynput import mouse
 from pynput.mouse import Button, Controller
 
-CURRENT_VERSION = "v1.2.5" #版本号
+CURRENT_VERSION = "v1.2.6" #版本号
 
 def run_as_admin():
     if ctypes.windll.shell32.IsUserAnAdmin():
@@ -241,6 +241,7 @@ class ImageRecognitionApp:
             "start": load_icon("start.png", self.root),
             "stop": load_icon("stop.png", self.root),
             "reset": load_icon("reset.png", self.root),
+            "menu": load_icon("menu.png", self.root),
         }
 
         self.hover_icons = {
@@ -254,6 +255,7 @@ class ImageRecognitionApp:
             "start": load_icon("start_hover.png", self.root),
             "stop": load_icon("stop_hover.png", self.root),
             "reset": load_icon("reset_hover.png", self.root),
+            "menu": load_icon("menu_hover.png", self.root),
         }
 
         # 定义鼠标进入和离开的回调函数
@@ -271,6 +273,25 @@ class ImageRecognitionApp:
         self.config_button_frame = ttk.Frame(self.bordered_frame)
         self.config_button_frame.pack(fill=tk.BOTH, expand=True, pady=(5, 5))
 
+        # 菜单按钮
+        self.menu_button = ttk.Button(
+            self.config_button_frame, 
+            image=self.icons["menu"],
+            command=self.show_menu, 
+            bootstyle="primary-outline"
+        )
+        self.menu_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0,0))
+
+        def _on_menu_enter(e):
+            on_enter(e, self.menu_button, self.hover_icons["menu"])
+            self.menu_button.invoke()  # 模拟点击按钮
+
+        def _on_menu_leave(e):
+            on_leave(e, self.menu_button, self.icons["menu"])
+
+        self.menu_button.bind("<Enter>", _on_menu_enter, add="+")
+        self.menu_button.bind("<Leave>", _on_menu_leave, add="+")
+
         # 导出配置按钮
         self.Export_config_button = ttk.Button(
             self.config_button_frame, 
@@ -278,7 +299,7 @@ class ImageRecognitionApp:
             command=self.export_config, 
             bootstyle="primary-outline"
         )
-        self.Export_config_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0,0))
+        self.Export_config_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5,0))
 
         # 保存 tooltip 实例
         self.export_tooltip = ToolTip(self.Export_config_button, "导出配置", self.root)
@@ -361,6 +382,12 @@ class ImageRecognitionApp:
 
         self.load_config_button.bind("<Enter>", _on_load_enter, add="+")
         self.load_config_button.bind("<Leave>", _on_load_leave, add="+")
+
+        # 初始化菜单对象
+        self.menu_popup = tk.Menu(self.root, tearoff=0)
+        # self.menu_popup.add_command(label="首选项", command=self.show_logs)
+        self.menu_popup.add_command(label="查看日志", command=self.show_logs)
+        self.menu_popup.add_command(label="检查更新", command=self.check_update)
 
         # 操作按钮行
         self.top_button_frame = tb.Frame(self.bordered_frame)
@@ -3030,8 +3057,6 @@ class ImageRecognitionApp:
                 tree_item = self.tree.get_children()[index]
                 item_values = list(self.tree.item(tree_item, 'values'))
                 self.current_step_name = item_values[1]
-                print(f"开始执行【{self.current_step_name}】")
-                logging.info(f"开始执行【{self.current_step_name}】")
                 # 判断当前项是否被禁用（状态存放在索引 8）
                 if self.item_is_disabled(tree_item):
                     print(f"【{self.current_step_name}】被禁用，跳过执行")
@@ -3055,6 +3080,18 @@ class ImageRecognitionApp:
                 jump_to_2 = current_step[12] if len(current_step) > 12 else ""
                 disable_target_2 = current_step[13] if len(current_step) > 13 else ""
 
+                if wait_time > 100 and self.retry_count < 1:
+                    print(f"延时{wait_time}毫秒")
+                    logging.info(f"延时{wait_time}毫秒")
+
+                # 等待（将毫秒转换为秒）
+                if wait_time > 0 and self.retry_count < 1:
+                    time.sleep(wait_time / 1000.0)
+                    print("delay")
+
+                print(f"开始执行【{self.current_step_name}】")
+                logging.info(f"开始执行【{self.current_step_name}】")
+
                 # 执行图像匹配或键盘操作
                 if mouse_click_coordinates and not self.only_keyboard_var.get():
                     match_result = self.match_and_click(img_path, similarity_threshold)
@@ -3062,11 +3099,6 @@ class ImageRecognitionApp:
                     match_result = self.match_and_click(img_path, similarity_threshold)
                 else:
                     match_result = True if keyboard_input else False
-                
-
-                # 等待（将毫秒转换为秒）
-                if wait_time > 0:
-                    time.sleep(wait_time / 1000.0)
 
                 if condition == "识图成功" and match_result:
 
@@ -3170,7 +3202,7 @@ class ImageRecognitionApp:
         """
         match_result = False
         while not match_result and self.running:
-            time.sleep(wait_time / 1000.0)
+            time.sleep(0.1)
             if os.path.exists(img_path):
                 match_result = self.match_and_click(img_path, similarity_threshold)
                 self.retry_count += 1
@@ -3589,89 +3621,120 @@ class ImageRecognitionApp:
 
             # 创建新窗口
             dialog = tk.Toplevel(self.root)
-            dialog.withdraw()                     # 先隐藏
+            dialog.withdraw()
             dialog.title("设置键盘操作")
             dialog.transient(self.root)
             dialog.grab_set()
-                
-            # 创建输入框和标签
+
             input_frame = tk.Frame(dialog)
             input_frame.pack(fill=tk.X, pady=5)
             tk.Label(input_frame, text="键盘动作:").pack(side=tk.LEFT)
-            entry = tk.Entry(input_frame, width=30)
+            entry = tk.Entry(input_frame)
             entry.insert(0, selected_image[3])
-            entry.pack(side=tk.LEFT, padx=5)
-
-            # 创建特殊键按钮框架
-            special_keys_frame = tk.LabelFrame(dialog, text="特殊键", padx=5, pady=5)
-            special_keys_frame.pack(fill=tk.X, pady=5)
-
-            special_keys = [
-                'enter', 'tab', 'space', 'backspace', 'delete',
-                'esc', 'home', 'end', 'pageup', 'pagedown',
-                'up', 'down', 'left', 'right'
-            ]
-
-            # 创建特殊键按钮（使用ttk.Button和secondary-outline样式）
-            for i, key in enumerate(special_keys):
-                btn = ttk.Button(
-                    special_keys_frame, 
-                    text=key.upper(),
-                    command=lambda k=key: add_special_key(f"{{{k}}}"),
-                    bootstyle="secondary-outline"
-                )
-                btn.grid(row=i//7, column=i%7, padx=2, pady=2, sticky='ew')
-
-            # 创建组合键框架
-            combo_keys_frame = tk.LabelFrame(dialog, text="组合键", padx=5, pady=5)
-            combo_keys_frame.pack(fill=tk.X, pady=5)
-
-            # 创建常用组合键按钮
-            combo_keys = [
-                ('复制', 'ctrl+c'), ('粘贴', 'ctrl+v'), ('剪切', 'ctrl+x'),
-                ('全选', 'ctrl+a'), ('保存', 'ctrl+s'), ('撤销', 'ctrl+z')
-            ]
-
-            for i, (name, combo) in enumerate(combo_keys):
-                btn = ttk.Button(
-                    combo_keys_frame, 
-                    text=name,
-                    command=lambda c=combo: add_special_key(f"{{{c}}}"),
-                    bootstyle="secondary-outline"
-                )
-                btn.grid(row=i//3, column=i%3, padx=2, pady=2, sticky='ew')
-
-            # 创建修饰键框架
-            modifier_keys_frame = tk.LabelFrame(dialog, text="修饰键", padx=5, pady=5)
-            modifier_keys_frame.pack(fill=tk.X, pady=5)
-
-            modifier_keys = ['ctrl', 'alt', 'shift', 'win']
-            for i, key in enumerate(modifier_keys):
-                btn = ttk.Button(
-                    modifier_keys_frame, 
-                    text=key.upper(),
-                    command=lambda k=key: add_special_key(f"{{{k}}}"),
-                    bootstyle="secondary-outline"
-                )
-                btn.grid(row=0, column=i, padx=2, pady=2, sticky='ew')
-
-            # 创建功能键框架
-            function_keys_frame = tk.LabelFrame(dialog, text="功能键", padx=5, pady=5)
-            function_keys_frame.pack(fill=tk.X, pady=5)
-
-            for i in range(12):
-                btn = ttk.Button(
-                    function_keys_frame, 
-                    text=f"F{i+1}",
-                    command=lambda k=i+1: add_special_key(f"{{f{k}}}"),
-                    bootstyle="secondary-outline"
-                )
-                btn.grid(row=i//6, column=i%6, padx=2, pady=2, sticky='ew')
+            entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
 
             def add_special_key(key):
                 current_pos = entry.index(tk.INSERT)
                 entry.insert(current_pos, key)
                 entry.focus_set()
+
+            def reset_input():
+                entry.delete(0, tk.END)
+
+            # 特殊键
+            special_keys_frame = tk.LabelFrame(dialog, text="特殊键", padx=5, pady=5)
+            special_keys_frame.pack(fill=tk.X, pady=5)
+            special_keys = [
+                'enter', 'tab', 'space', 'backspace', 'delete',
+                'esc', 'home', 'end', 'pageup', 'pagedown',
+                'up', 'down', 'left', 'right'
+            ]
+            for i, key in enumerate(special_keys):
+                btn = ttk.Button(
+                    special_keys_frame,
+                    text=key.upper(),
+                    command=lambda k=key: add_special_key(f"{{{k}}}"),
+                    bootstyle="secondary-outline"
+                )
+                btn.grid(row=i // 7, column=i % 7, padx=2, pady=2, sticky='ew')
+
+            # 组合键
+            combo_keys_frame = tk.LabelFrame(dialog, text="组合键", padx=5, pady=5)
+            combo_keys_frame.pack(fill=tk.X, pady=5)
+            combo_keys = [
+                ('复制', 'ctrl+c'), ('粘贴', 'ctrl+v'), ('剪切', 'ctrl+x'),
+                ('全选', 'ctrl+a'), ('保存', 'ctrl+s'), ('撤销', 'ctrl+z')
+            ]
+            for i, (name, combo) in enumerate(combo_keys):
+                btn = ttk.Button(
+                    combo_keys_frame,
+                    text=name,
+                    command=lambda c=combo: add_special_key(f"{{{c}}}"),
+                    bootstyle="secondary-outline"
+                )
+                btn.grid(row=i // 3, column=i % 3, padx=2, pady=2, sticky='ew')
+
+            # 修饰键（支持多选 + A-Z）
+            modifier_keys_frame = tk.LabelFrame(dialog, text="修饰键组合", padx=5, pady=5)
+            modifier_keys_frame.pack(fill=tk.X, pady=5)
+
+            selected_modifiers = set()
+
+            def toggle_modifier(mod_key, btn):
+                if mod_key in selected_modifiers:
+                    selected_modifiers.remove(mod_key)
+                    btn.configure(bootstyle="secondary-outline")
+                else:
+                    selected_modifiers.add(mod_key)
+                    btn.configure(bootstyle="success-outline")
+
+            mod_keys = ['ctrl', 'alt', 'shift', 'win']
+            mod_buttons = {}
+            for i, key in enumerate(mod_keys):
+                btn = ttk.Button(
+                    modifier_keys_frame,
+                    text=key.upper(),
+                    command=lambda k=key, b=None: toggle_modifier(k, mod_buttons[k]),
+                    bootstyle="secondary-outline"
+                )
+                mod_buttons[key] = btn
+                btn.grid(row=0, column=i, padx=2, pady=2, sticky='ew')
+
+            # 添加 A-Z 键用于组合
+            alphabet_frame = tk.Frame(modifier_keys_frame)
+            alphabet_frame.grid(row=1, column=0, columnspan=4, pady=(10, 0))
+            for i, ch in enumerate("ABCDEFGHIJKLMNOPQRSTUVWXYZ"):
+                btn = ttk.Button(
+                    alphabet_frame,
+                    text=ch,
+                    command=lambda c=ch.lower(): insert_combo_key(c),
+                    bootstyle="secondary-outline"
+                )
+                btn.grid(row=i // 13, column=i % 13, padx=1, pady=2)
+
+            def insert_combo_key(letter):
+                if selected_modifiers:
+                    combo = "+".join(sorted(selected_modifiers)) + f"+{letter}"
+                    add_special_key(f"{{{combo}}}")
+                else:
+                    add_special_key(letter)
+
+                # 插入后重置修饰键状态（取消高亮 + 清空记录）
+                for mod_key in selected_modifiers.copy():
+                    selected_modifiers.remove(mod_key)
+                    mod_buttons[mod_key].configure(bootstyle="secondary-outline")
+
+            # 功能键
+            function_keys_frame = tk.LabelFrame(dialog, text="功能键", padx=5, pady=5)
+            function_keys_frame.pack(fill=tk.X, pady=5)
+            for i in range(12):
+                btn = ttk.Button(
+                    function_keys_frame,
+                    text=f"F{i + 1}",
+                    command=lambda k=i + 1: add_special_key(f"{{f{k}}}"),
+                    bootstyle="secondary-outline"
+                )
+                btn.grid(row=i // 6, column=i % 6, padx=2, pady=2, sticky='ew')
 
             def save_input():
                 new_keyboard_input = entry.get().strip()
@@ -3679,36 +3742,39 @@ class ImageRecognitionApp:
                 new_image = tpl[:3] + (new_keyboard_input,) + tpl[4:]
                 self.image_list[selected_index] = new_image
                 self.refresh_listbox_by_current_filter()
-
                 dialog.destroy()
-            
-            # 添加保存和取消按钮
+
             button_frame = tk.Frame(dialog)
             button_frame.pack(fill=tk.X, pady=10)
 
-            # 在创建按钮时添加bootstyle参数
             save_button = ttk.Button(
-                button_frame, 
-                text="保存", 
+                button_frame,
+                text="保存",
                 command=save_input,
-                bootstyle="primary-outline"  # 主要轮廓样式
+                bootstyle="primary-outline"
             )
             save_button.pack(side=tk.RIGHT, padx=5)
 
             cancel_button = ttk.Button(
-                button_frame, 
-                text="取消", 
+                button_frame,
+                text="取消",
                 command=dialog.destroy,
-                bootstyle="primary-outline"  # 次要轮廓样式
+                bootstyle="primary-outline"
             )
             cancel_button.pack(side=tk.RIGHT, padx=5)
 
-            # 让 Tkinter 计算理想大小
+            reset_button = ttk.Button(
+                button_frame,
+                text="重置",
+                command=reset_input,
+                bootstyle="primary-outline"
+            )
+            reset_button.pack(side=tk.RIGHT, padx=5)
+
             dialog.update_idletasks()
             w = dialog.winfo_reqwidth()
             h = dialog.winfo_reqheight()
 
-            # 计算居中位置
             main_x = self.root.winfo_x()
             main_y = self.root.winfo_y()
             main_w = self.root.winfo_width()
@@ -3716,7 +3782,6 @@ class ImageRecognitionApp:
             x = main_x + (main_w - w) // 2
             y = main_y + (main_h - h) // 2
 
-            # 一次性设置大小和位置，并显示
             dialog.geometry(f"{w}x{h}+{x}+{y}")
             dialog.deiconify()
 
@@ -5207,9 +5272,16 @@ class ImageRecognitionApp:
 
                 parts = img_data[4].split(":")
 
-                # 如果parts长度不足5（即没有parts[4]），则补充"0,0"
-                if len(parts) < 5:
-                    parts += ["0,0"] * (5 - len(parts))
+                # 如果parts长度不足，则补充
+                is_coordinate = lambda s: re.match(r'^\d+,\d+$', s)
+
+                if len(parts) == 1 and is_coordinate(parts[0]):
+                    parts = ["click", parts[0], "0", "1", "0,0"]
+                elif len(parts) == 3:
+                    parts += ["1", "0,0"]
+                elif len(parts) == 4:
+                    parts += ["0,0"] 
+
 
                 img_data[4] = ":".join(parts)
                 self.image_list[i] = img_data
@@ -6267,9 +6339,6 @@ class ImageRecognitionApp:
         self.empty_space_menu.add_separator()
         self.empty_space_menu.add_command(label="保存配置", command=self.save_config)
         self.empty_space_menu.add_command(label="加载配置", command=self.load_config)
-        self.empty_space_menu.add_separator()
-        self.empty_space_menu.add_command(label="查看日志", command=self.show_logs)
-        self.empty_space_menu.add_command(label="检查更新", command=self.check_update)
 
         # 选中项的菜单
         self.context_menu = tk.Menu(self.root, tearoff=0, postcommand=self.update_context_menu)
@@ -6303,9 +6372,6 @@ class ImageRecognitionApp:
         self.context_menu.add_command(label="打开图片位置", command=self.open_image_location)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="清空列表", command=self.clear_list)
-        self.context_menu.add_separator()
-        self.context_menu.add_command(label="查看日志", command=self.show_logs)
-        self.context_menu.add_command(label="检查更新", command=self.check_update)
 
         # 多选菜单
         self.multi_select_menu = tk.Menu(self.root, tearoff=0)
@@ -6319,9 +6385,6 @@ class ImageRecognitionApp:
         self.multi_select_menu.add_command(label="更多设置", command=self.more_set)
         self.multi_select_menu.add_separator()
         self.multi_select_menu.add_command(label="清空列表", command=self.clear_list)
-        self.multi_select_menu.add_separator()
-        self.multi_select_menu.add_command(label="查看日志", command=self.show_logs)
-        self.multi_select_menu.add_command(label="检查更新", command=self.check_update)
 
     def update_context_menu(self):
         selected = self.tree.selection()
@@ -6644,6 +6707,13 @@ class ImageRecognitionApp:
             messagebox.showwarning("警告", "找不到对应的图片数据！")
         except Exception as e:
             messagebox.showerror("错误", f"打开图片位置时出错:\n{str(e)}")
+
+    # 显示菜单的函数
+    def show_menu(self):
+        # 获取按钮在屏幕上的坐标
+        x = self.menu_button.winfo_rootx()
+        y = self.menu_button.winfo_rooty() + self.menu_button.winfo_height() + 5
+        self.menu_popup.tk_popup(x, y)
 
     def show_context_menu(self, event):
         item = self.tree.identify_row(event.y)
