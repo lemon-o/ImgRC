@@ -36,7 +36,7 @@ from ttkbootstrap.widgets import Entry
 from pynput import mouse
 from pynput.mouse import Button, Controller
 
-CURRENT_VERSION = "v1.2.6" #版本号
+CURRENT_VERSION = "v1.2.8" #版本号
 
 def run_as_admin():
     if ctypes.windll.shell32.IsUserAnAdmin():
@@ -159,6 +159,7 @@ class ImageRecognitionApp:
         self.button_pressed = False  # 添加一个标志位来跟踪按钮是否被按下
         self.need_disable_drag = False
         self.last_area_choice = 'screenshot'
+        self.direct_box_selection = False
         
         self.DOUBLE_CLICK_THRESHOLD = 0.3
         self._click_timer = None
@@ -1742,7 +1743,12 @@ class ImageRecognitionApp:
                 lbl.unbind("<Enter>")
                 lbl.unbind("<Leave>")
 
-                # 不截断，直接显示完整 raw
+                # 如果不是自动计算，就只显示“:”分隔的第二部分
+                if raw != "自动计算":
+                    raw_parts = raw.split(":")
+                    raw = raw_parts[1] if len(raw_parts) > 1 else raw
+
+                # 不截断，直接显示完整
                 lbl.config(text=raw, anchor="e", width=0)
 
                 if raw != "自动计算":
@@ -1754,8 +1760,8 @@ class ImageRecognitionApp:
                         text_width = font.measure(disp)
                         label_width = e.widget.winfo_width()
                         text_right_bound = label_width
-                        text_left_bound = label_width - 2*text_width
-                        # ✅ 仅在鼠标进入时就判断一次位置，避免闪烁
+                        text_left_bound = label_width - 2 * text_width
+                        # ✅ 仅在鼠标进入时判断一次位置
                         if text_left_bound <= e.x <= text_right_bound:
                             提示管理器.显示提示(
                                 e.widget,
@@ -1831,6 +1837,7 @@ class ImageRecognitionApp:
                             )
                     lbl.bind("<Enter>", on_enter_default)
                     lbl.bind("<Leave>", lambda e: 提示管理器.隐藏提示())
+
                 else:
                     # raw 非“默认”时，走原有的截断+提示逻辑
                     max_width = int(self.root.winfo_width() * 3 / 10)
@@ -2172,24 +2179,23 @@ class ImageRecognitionApp:
                 else:
                     new_area_str = f"{coords}|{area_choice_value}|{l}, {t}, {r}, {b}"
 
-                # 创建更新后的数据元组
+                # 创建更新后的数据元组（tree索引注释）
                 updated_image = (
                     screenshot_path,          # 0: 新的图片路径
                     selected_image[1],       # 1: 步骤名称
                     selected_image[2],       # 2: 识图阈值阈值
                     selected_image[3],       # 3: 键盘动作
-                    mouse_action,            # 4: 更新后的鼠标动作
+                    mouse_action,            # 4: 鼠标动作
                     selected_image[5],       # 5: 等待时间
                     selected_image[6],       # 6: 条件
                     selected_image[7],       # 7: 需跳转
                     selected_image[8],       # 8: 状态
                     selected_image[9],      # 9: 【需禁用】目标
-                    selected_image[10],     # 10: 鼠标动作
+                    selected_image[10],     # 10: 鼠标动作中文显示
                     selected_image[11],       # 11: 条件2
                     selected_image[12],      # 12: 需跳转2
                     selected_image[13],      # 13: 需禁用2
                     new_area_str,      # 13: 识图区域
-                    #新增索引
                 )
 
                 # 4. 更新数据源
@@ -2767,12 +2773,6 @@ class ImageRecognitionApp:
                         if not step_name or filter_text.lower() not in step_name.lower():
                             continue
 
-                    # 提取点击位置部分
-                    orig_x, orig_y = map(int, mouse_click_coordinates.split(":")[1].split(","))
-                    off_set_x, off_set_y = map(int, mouse_click_coordinates.split(":")[4].split(","))
-                    click_x = orig_x + off_set_x
-                    click_y = orig_y + off_set_y
-                    click_coords = f"{click_x},{click_y}"
                     # 加载图像并创建缩略图
                     try:
                         image = Image.open(img_path)
@@ -2785,7 +2785,7 @@ class ImageRecognitionApp:
                             step_name, 
                             similarity_threshold, 
                             keyboard_input, 
-                            click_coords,  # 只显示x,y
+                            mouse_click_coordinates, 
                             wait_time,
                             condition,
                             jump_to,
@@ -3626,37 +3626,39 @@ class ImageRecognitionApp:
             dialog.transient(self.root)
             dialog.grab_set()
 
-            input_frame = tk.Frame(dialog)
-            input_frame.pack(fill=tk.X, pady=5)
-            tk.Label(input_frame, text="键盘动作:").pack(side=tk.LEFT)
-            entry = tk.Entry(input_frame)
-            entry.insert(0, selected_image[3])
-            entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-
-            def add_special_key(key):
-                current_pos = entry.index(tk.INSERT)
-                entry.insert(current_pos, key)
-                entry.focus_set()
-
-            def reset_input():
-                entry.delete(0, tk.END)
-
             # 特殊键
             special_keys_frame = tk.LabelFrame(dialog, text="特殊键", padx=5, pady=5)
             special_keys_frame.pack(fill=tk.X, pady=5)
-            special_keys = [
-                'enter', 'tab', 'space', 'backspace', 'delete',
-                'esc', 'home', 'end', 'pageup', 'pagedown',
-                'up', 'down', 'left', 'right'
+
+            # 按实际操作逻辑分行排列
+            special_keys_layout = [
+                ['esc', 'tab', 'space', 'backspace', 'enter'],       
+                ['delete', 'home', 'end', 'pageup', 'pagedown'],                        
+                ['', '↑'],             # 左边空一格，让 ↑ 居中                                       
+                ['←', '↓', '→']                                                 
             ]
-            for i, key in enumerate(special_keys):
-                btn = ttk.Button(
-                    special_keys_frame,
-                    text=key.upper(),
-                    command=lambda k=key: add_special_key(f"{{{k}}}"),
-                    bootstyle="secondary-outline"
-                )
-                btn.grid(row=i // 7, column=i % 7, padx=2, pady=2, sticky='ew')
+
+            # 箭头映射
+            arrow_map = {
+                '↑': 'up',
+                '↓': 'down',
+                '←': 'left',
+                '→': 'right'
+            }
+
+            for row_index, row_keys in enumerate(special_keys_layout):
+                for col_index, key in enumerate(row_keys):
+                    if key == '':  # 空占位，不生成按钮
+                        continue
+                    display_text = key.capitalize() if key not in arrow_map else key  # 按钮显示
+                    mapped_key = arrow_map.get(key, key)  # 实际传入英文
+                    btn = ttk.Button(
+                        special_keys_frame,
+                        text=display_text,
+                        command=lambda k=mapped_key: add_special_key(f"{{{k}}}"),
+                        bootstyle="secondary-outline"
+                    )
+                    btn.grid(row=row_index, column=col_index, padx=2, pady=2, sticky='ew')
 
             # 组合键
             combo_keys_frame = tk.LabelFrame(dialog, text="组合键", padx=5, pady=5)
@@ -3674,8 +3676,8 @@ class ImageRecognitionApp:
                 )
                 btn.grid(row=i // 3, column=i % 3, padx=2, pady=2, sticky='ew')
 
-            # 修饰键（支持多选 + A-Z）
-            modifier_keys_frame = tk.LabelFrame(dialog, text="修饰键组合", padx=5, pady=5)
+            # 自定义组合键
+            modifier_keys_frame = tk.LabelFrame(dialog, text="自定义组合键", padx=5, pady=5)
             modifier_keys_frame.pack(fill=tk.X, pady=5)
 
             selected_modifiers = set()
@@ -3686,31 +3688,38 @@ class ImageRecognitionApp:
                     btn.configure(bootstyle="secondary-outline")
                 else:
                     selected_modifiers.add(mod_key)
-                    btn.configure(bootstyle="success-outline")
+                    btn.configure(bootstyle="warning")
 
             mod_keys = ['ctrl', 'alt', 'shift', 'win']
             mod_buttons = {}
             for i, key in enumerate(mod_keys):
                 btn = ttk.Button(
                     modifier_keys_frame,
-                    text=key.upper(),
+                    text=key.capitalize(),  # 首字母大写
                     command=lambda k=key, b=None: toggle_modifier(k, mod_buttons[k]),
                     bootstyle="secondary-outline"
                 )
                 mod_buttons[key] = btn
                 btn.grid(row=0, column=i, padx=2, pady=2, sticky='ew')
 
-            # 添加 A-Z 键用于组合
+            # 添加 A-Z和数字 键用于组合
             alphabet_frame = tk.Frame(modifier_keys_frame)
             alphabet_frame.grid(row=1, column=0, columnspan=4, pady=(10, 0))
-            for i, ch in enumerate("ABCDEFGHIJKLMNOPQRSTUVWXYZ"):
+
+            # 每行显示 12 个
+            cols = 12
+            for i, ch in enumerate("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"):
                 btn = ttk.Button(
                     alphabet_frame,
                     text=ch,
                     command=lambda c=ch.lower(): insert_combo_key(c),
                     bootstyle="secondary-outline"
                 )
-                btn.grid(row=i // 13, column=i % 13, padx=1, pady=2)
+                btn.grid(row=i // cols, column=i % cols, padx=2, pady=2, sticky='ew')
+
+            # 设置每列等宽
+            for col in range(cols):
+                alphabet_frame.grid_columnconfigure(col, weight=1)
 
             def insert_combo_key(letter):
                 if selected_modifiers:
@@ -3735,6 +3744,26 @@ class ImageRecognitionApp:
                     bootstyle="secondary-outline"
                 )
                 btn.grid(row=i // 6, column=i % 6, padx=2, pady=2, sticky='ew')
+            
+            #键盘动作
+            input_frame = tk.Frame(dialog)
+            input_frame.pack(fill=tk.X, pady=5)
+            tk.Label(input_frame, text="键盘动作:").pack(side=tk.LEFT)
+            entry = tk.Entry(input_frame)
+            entry.insert(0, selected_image[3])
+            entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+
+            def add_special_key(key):
+                current_pos = entry.index(tk.INSERT)
+                entry.insert(current_pos, key)
+                entry.focus_set()
+
+            def reset_input():
+                for mod_key in selected_modifiers.copy():
+                    selected_modifiers.remove(mod_key)
+                    mod_buttons[mod_key].configure(bootstyle="secondary-outline")
+                    
+                entry.delete(0, tk.END)
 
             def save_input():
                 new_keyboard_input = entry.get().strip()
@@ -3744,7 +3773,7 @@ class ImageRecognitionApp:
                 self.refresh_listbox_by_current_filter()
                 dialog.destroy()
 
-            button_frame = tk.Frame(dialog)
+            button_frame = tk.Frame(input_frame)
             button_frame.pack(fill=tk.X, pady=10)
 
             save_button = ttk.Button(
@@ -4030,12 +4059,12 @@ class ImageRecognitionApp:
 
                 #获取鼠标动作
                 action = action_var.get()
+                dynamic = "1" if dynamic_var.get() else "0"
                 
                 if action == "none":
                     mouse_action = f"{action}:{current_coords}:0:1:{offset_info}"
                     mouse_action_result = ""  # 显示为空
                 else:
-                    dynamic = "1" if dynamic_var.get() else "0"
                     
                     # 检查是否尝试在关闭识图的情况下启用动态点击
                     if dynamic == "1" and selected_image[2] == 0.0:
@@ -4078,13 +4107,26 @@ class ImageRecognitionApp:
                     mouse_action_result = f"{action_desc} {count_val}{unit}{dynamic_desc}" if action in ["click", "scrollUp", "scrollDown"] \
                                         else f"{action_desc}{dynamic_desc}"
 
+                #当开启动态点击，且识图区域为步骤图片时，自动切换全屏识图
+                original_area_str = selected_image[14]
+                click_coords, area_choice_value, img_coords = original_area_str.split("|")
+                new_area_str = original_area_str
+                if dynamic == "1" and area_choice_value == 'screenshot':
+                    new_area_str = f"{click_coords}|fullscreen|{img_coords}"
+                elif dynamic == "0" and area_choice_value == 'fullscreen':
+                    new_area_str = f"{click_coords}|screenshot|{img_coords}"
+
                 # 更新数据
                 tpl = tuple(selected_image)
-                # 修改索引4和10：
-                # tpl[:4] 是前4个元素 (0,1,2,3)
-                # tpl[5:10] 是元素5到9
-                # tpl[11:] 是元素11到末尾
-                new_image = tpl[:4] + (mouse_action,) + tpl[5:10] + (mouse_action_result,) + tpl[11:]
+                new_image = (
+                    tpl[:4]                     # 保留 0~3
+                    + (mouse_action,)           # 替换第 4 项
+                    + tpl[5:10]                 # 保留 5~9
+                    + (mouse_action_result,)    # 替换第 10 项
+                    + tpl[11:14]                # 保留 11~13
+                    + (new_area_str,)           # 替换第 14 项（第15个元素）
+                    + tpl[15:]                  # 保留 15 之后的
+                )
                 self.image_list[selected_index] = new_image
 
                 self.refresh_listbox_by_current_filter()
@@ -4098,22 +4140,14 @@ class ImageRecognitionApp:
         button_frame = tk.Frame(dialog)
         button_frame.pack(fill=tk.X, pady=10)
 
-        # 在创建按钮时添加bootstyle参数
-        save_button = ttk.Button(
-            button_frame, 
-            text="保存", 
-            command=save_mouse_action,
-            bootstyle="primary-outline"  
-        )
-        save_button.pack(side=tk.RIGHT, padx=5)
+        center_frame = ttk.Frame(button_frame)
+        center_frame.pack()
 
-        cancel_button = ttk.Button(
-            button_frame, 
-            text="取消", 
-            command=dialog.destroy,
-            bootstyle="primary-outline"  
-        )
-        cancel_button.pack(side=tk.RIGHT, padx=5)
+        cancel_btn = ttk.Button(center_frame, text="取消", command=dialog.destroy, bootstyle="primary-outline")
+        cancel_btn.pack(side=tk.LEFT, padx=5)
+
+        save_btn = ttk.Button(center_frame, text="保存", command=save_mouse_action, bootstyle="primary-outline")
+        save_btn.pack(side=tk.LEFT, padx=5)
 
         # 让 Tkinter 计算理想大小
         dialog.update_idletasks()
@@ -6122,6 +6156,7 @@ class ImageRecognitionApp:
             self.button_pressed = False  # 添加一个标志位来跟踪按钮是否被按下
             self.need_disable_drag = False
             self.last_area_choice = 'screenshot'
+            self.direct_box_selection = False
             
             self.DOUBLE_CLICK_THRESHOLD = 0.3
             self._click_timer = None
@@ -6342,30 +6377,33 @@ class ImageRecognitionApp:
 
         # 选中项的菜单
         self.context_menu = tk.Menu(self.root, tearoff=0, postcommand=self.update_context_menu)
-        self.context_menu.add_command(label="重新截图(F4)", command=self.retake_screenshot)  # 菜单索引0
-        self.context_menu.add_command(label="关闭识图", command=self.Image_recognition_click)  # 菜单索引1
-        self.context_menu.add_command(label="识图区域", command=self.image_rc_area)
-        self.context_menu.add_command(label="条件判断", command=self.set_condition_jump)
+        self.context_menu.add_command(label="重新截图(F4)", command=self.retake_screenshot) 
         self.context_menu.add_separator()
 
-        # 创建“更多选项”子菜单
+        # 创建“编辑”子菜单
         more_menu = tk.Menu(self.context_menu, tearoff=0)
+        more_menu.add_command(label="快速编辑", command=self.quick_edit)
+        more_menu.add_separator()
+        more_menu.add_command(label="识图区域", command=self.image_rc_area)
         more_menu.add_command(label="鼠标动作", command=self.edit_mouse_action)
         more_menu.add_command(label="键盘动作", command=self.edit_keyboard_input)
+        more_menu.add_command(label="条件判断", command=self.set_condition_jump)
         more_menu.add_command(label="点击偏移", command=self.offset_coords)
         more_menu.add_command(label="识图阈值", command=self.edit_similarity_threshold)
         more_menu.add_command(label="延时ms", command=self.edit_wait_time)
         more_menu.add_command(label="重命名", command=self.edit_step_name)
-
         # 把子菜单添加到主菜单
         self.context_menu.add_cascade(label="编辑", menu=more_menu)
-        self.context_menu.add_separator()
-        self.context_menu.add_command(label="禁用", command=self.toggle_disable_status)  # 菜单索引7
-        self.context_menu.add_command(label="删除", command=self.delete_selected_image)
+
+        self.context_menu.add_cascade(label="预设", command=self.preset)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="复制", command=self.copy_item)
         self.context_menu.add_command(label="剪切", command=self.cut_item)
         self.context_menu.add_command(label="粘贴", command=self.paste_item)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="删除", command=self.delete_selected_image)
+        self.context_menu.add_command(label="禁用", command=self.toggle_disable_status)  # 菜单索引10
+        self.context_menu.add_command(label="关闭识图", command=self.Image_recognition_click)  # 菜单索引11
         self.context_menu.add_separator()
         self.context_menu.add_command(label="从此步骤运行", command=self.start_from_step)
         self.context_menu.add_separator()
@@ -6398,14 +6436,14 @@ class ImageRecognitionApp:
                     similarity = float(values[2])
                     new_label = "关闭识图" if similarity > 0 else "开启识图"
                     new_cmd = self.Normal_click if similarity > 0 else self.Image_recognition_click
-                    self.context_menu.entryconfig(1, label=new_label, command=new_cmd)
+                    self.context_menu.entryconfig(11, label=new_label, command=new_cmd)
                 except ValueError:
                     print("识图阈值解析错误")
             
             # 更新禁用/启用菜单项（基于“状态”列）
             disabled = self.item_is_disabled(selected_item)
             new_disable_label = "启用" if disabled else "禁用"
-            self.context_menu.entryconfig(7, label=new_disable_label, command=self.toggle_disable_status)
+            self.context_menu.entryconfig(10, label=new_disable_label, command=self.toggle_disable_status)
             self.update_label() # 更新详细信息
     
     def toggle_disable_status(self):
@@ -6451,6 +6489,266 @@ class ImageRecognitionApp:
     def toggle_click_label(self):
         self.update_context_menu()  # 右键菜单更新
         self.refresh_listbox_by_current_filter()
+
+    def quick_edit(self):
+        dialog = tk.Toplevel(self.root)
+        dialog.withdraw()
+        dialog.title("快速编辑")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        # 按钮样式配置
+        btn_width = 12
+        btn_padx = 5
+        btn_pady = 5
+
+        # 创建按钮：文本 + 对应方法
+        btn_actions = [
+            ("识图区域", self.image_rc_area),
+            ("鼠标动作", self.edit_mouse_action),
+            ("键盘动作", self.edit_keyboard_input),
+            ("条件判断", self.set_condition_jump),
+            ("点击偏移", self.offset_coords),
+            ("识图阈值", self.edit_similarity_threshold),
+        ]
+
+        # 按钮容器
+        frame = tk.Frame(dialog)
+        frame.pack(padx=10, pady=10)
+
+        # 两行三列布局
+        for i, (text, cmd) in enumerate(btn_actions):
+            btn = ttk.Button(
+                frame,
+                text=text,
+                width=btn_width,
+                command=cmd,
+                bootstyle="primary-outline"
+            )
+            btn.grid(row=i // 3, column=i % 3, padx=btn_padx, pady=btn_pady)
+
+        # 计算并居中显示对话框
+        dialog.update_idletasks()
+        w = dialog.winfo_reqwidth()
+        h = dialog.winfo_reqheight()
+
+        main_x = self.root.winfo_x()
+        main_y = self.root.winfo_y()
+        main_w = self.root.winfo_width()
+        main_h = self.root.winfo_height()
+        x = main_x + (main_w - w) // 2
+        y = main_y + (main_h - h) // 2
+
+        dialog.geometry(f"{w}x{h}+{x}+{y}")
+        dialog.deiconify()
+        dialog.iconbitmap("icon/app.ico")
+
+    def preset(self):
+        selected_items = self.tree.selection()
+        if not selected_items:
+            return
+
+        selected_index = self.get_selected_original_index()
+        tree_item_id = selected_items[0]
+        original_tpl = tuple(self.image_list[selected_index])
+
+        dialog = tk.Toplevel(self.root)
+        dialog.withdraw()
+        dialog.title("预设列表")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        main_frame = ttk.Frame(dialog)
+        main_frame.pack(padx=10, pady=10, fill=tk.BOTH)
+
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X)
+
+        preset_buttons = {}
+        selected_preset = [None]
+
+        def format_tooltip(text, width=20):
+            lines = []
+            while len(text) > width:
+                split_pos = text.rfind(" ", 0, width)
+                if split_pos == -1:
+                    split_pos = width
+                lines.append(text[:split_pos])
+                text = text[split_pos:].strip()
+            if text:
+                lines.append(text)
+            return "\n".join(lines)
+
+        def on_preset_click(key):
+            for k, btn in preset_buttons.items():
+                btn.configure(bootstyle="secondary-outline")
+            preset_buttons[key].configure(bootstyle="warning")
+            selected_preset[0] = key
+
+        def create_preset_button(parent, text, key, tooltip_text):
+            btn = ttk.Button(parent, text=text, bootstyle="secondary-outline",
+                            command=lambda k=key: on_preset_click(k))
+            btn.pack(side="left", padx=5)  # 左对齐排布
+            preset_buttons[key] = btn
+
+            if tooltip_text:
+                tip = ToolTip(btn, format_tooltip(tooltip_text), self.root)
+                btn.bind("<Enter>", lambda e: tip.showtip())
+                btn.bind("<Leave>", lambda e: tip.hidetip())
+
+            return btn
+
+        # 第一行按钮容器
+        row1_frame = ttk.Frame(main_frame)
+        row1_frame.pack(anchor="c", pady=(15, 0))  # 独立左对齐
+
+        hub_btn = create_preset_button(
+            row1_frame, "步骤枢纽", "hub",
+            "识图成功跳转到下一步骤，识图失败跳转到上一步骤，鼠标动作改为“无操作”"
+        )
+        top_btn = create_preset_button(
+            row1_frame, "滚动至顶部", "top",
+            "关闭识图，设置键盘动作\"{home}\"，将当前聚焦的页面滚动到最顶部，并修改步骤名称"
+        )
+        bottom_btn = create_preset_button(
+            row1_frame, "滚动至底部", "bottom",
+            "关闭识图，设置键盘动作\"{end}\"，将当前聚焦的页面滚动到最底部，并修改步骤名称"
+        )
+
+        # 第二行按钮容器
+        row2_frame = ttk.Frame(main_frame)
+        row2_frame.pack(anchor="c", pady=(10, 0))  # 独立左对齐
+
+        dynamic_btn = create_preset_button(
+            row2_frame, "开启动态点击并设置识图区域", "dynamic", ""
+        )
+        disable_dynamic_btn = create_preset_button(
+            row2_frame, "关闭动态点击", "disable_dynamic", ""
+        )
+
+        # 分隔线
+        separator = ttk.Separator(main_frame, orient='horizontal')
+        separator.pack(fill='x', pady=(15, 10))
+
+        action_frame = ttk.Frame(main_frame)
+        action_frame.pack()
+
+        def _get_padded_tuple(min_len=13):
+            cur = tuple(original_tpl)
+            if len(cur) < min_len:
+                cur = cur + ("",) * (min_len - len(cur))
+            return cur
+
+        def get_hub_tuple():
+            cur = _get_padded_tuple(13)
+            cur = cur[:6] + ("识图成功",) + cur[7:]
+
+            if selected_index + 1 < len(self.image_list):
+                next_val = self.image_list[selected_index + 1][1]
+            else:
+                next_val = self.image_list[selected_index][1]
+            cur = cur[:7] + (next_val,) + cur[8:]
+
+            cur = cur[:11] + ("识图失败",) + cur[12:]
+
+            if selected_index - 1 >= 0:
+                prev_val = self.image_list[selected_index - 1][1]
+            else:
+                prev_val = self.image_list[selected_index][1]
+            cur = cur[:12] + (prev_val,) + cur[13:]
+
+            if cur[4]:
+                parts = str(cur[4]).split(":")
+                parts[0] = "none"
+                cur = cur[:4] + (":".join(parts),) + cur[5:]
+
+            return cur
+
+        def get_scroll_top_tuple():
+            cur = _get_padded_tuple(4)
+            cur = cur[:2] + ("0.0",) + ("{home}",) + cur[4:]
+            return cur
+
+        def get_scroll_bottom_tuple():
+            cur = _get_padded_tuple(4)
+            cur = cur[:2] + ("0.0",) + ("{end}",) + cur[4:]
+            return cur
+
+        def get_dynamic_click_tuple():
+            cur = _get_padded_tuple(13)
+            if cur[4]:
+                parts = str(cur[4]).split(":")
+                parts[2] = "1"
+                cur = cur[:4] + (":".join(parts),) + cur[5:]
+
+            if cur[10]:
+                if "启用动态点击" not in cur[10]:
+                    cur = cur[:10] + (cur[10] + " 启用动态点击",) + cur[11:]
+
+            return cur
+
+        def get_disable_dynamic_click_tuple():
+            cur = _get_padded_tuple(13)
+            if cur[4]:
+                parts = str(cur[4]).split(":")
+                parts[2] = "0"
+                cur = cur[:4] + (":".join(parts),) + cur[5:]
+
+            if cur[10]:
+                if "启用动态点击" in cur[10]:
+                    cur = cur[:10] + (cur[10].replace(" 启用动态点击", ""),) + cur[11:]
+
+            return cur
+
+        def on_save():
+            key = selected_preset[0]
+            if not key:
+                tk.messagebox.showwarning("提示", "请先选择一个预设")
+                return
+            if key == "hub":
+                new_tuple = get_hub_tuple()
+            elif key == "top":
+                new_tuple = get_scroll_top_tuple()
+            elif key == "bottom":
+                new_tuple = get_scroll_bottom_tuple()
+            elif key == "dynamic":
+                new_tuple = get_dynamic_click_tuple()
+                # 保存后调用 image_rc_area
+                self.direct_box_selection = True
+                self.image_rc_area()
+            elif key == "disable_dynamic":
+                new_tuple = get_disable_dynamic_click_tuple()
+            else:
+                return
+            self.image_list[selected_index] = new_tuple
+            self.tree.item(tree_item_id, values=new_tuple)
+            self.refresh_listbox_by_current_filter()
+            dialog.destroy()
+
+        def on_cancel():
+            dialog.destroy()
+
+        center_frame = ttk.Frame(action_frame)
+        center_frame.pack()
+
+        cancel_btn = ttk.Button(center_frame, text="取消", command=on_cancel, bootstyle="primary-outline")
+        cancel_btn.pack(side=tk.LEFT, padx=5)
+
+        save_btn = ttk.Button(center_frame, text="应用", command=on_save, bootstyle="primary-outline")
+        save_btn.pack(side=tk.LEFT, padx=5)
+
+        dialog.update_idletasks()
+        w = dialog.winfo_reqwidth()
+        h = dialog.winfo_reqheight()
+        main_x = self.root.winfo_x()
+        main_y = self.root.winfo_y()
+        main_w = self.root.winfo_width()
+        main_h = self.root.winfo_height()
+        x = main_x + (main_w - w) // 2
+        y = main_y + (main_h - h) // 2
+        dialog.geometry(f"{w}x{h}+{x}+{y}")
+        dialog.deiconify()
+        dialog.iconbitmap("icon/app.ico")
 
     def more_set(self):
         dialog = tk.Toplevel(self.root)
@@ -6611,6 +6909,16 @@ class ImageRecognitionApp:
                                 mouse_action_result = f"{action_desc} {count}{unit}{dynamic_desc}"
                             else:
                                 mouse_action_result = f"{action_desc}{dynamic_desc}"
+
+                            #当开启动态点击，且识图区域为步骤图片时，自动切换全屏识图
+                            original_area_str = new_image[14]
+                            click_coords, area_choice_value, img_coords = original_area_str.split("|")
+                            new_area_str = original_area_str
+                            if dynamic_value == "1" and area_choice_value == 'screenshot':
+                                new_area_str = f"{click_coords}|fullscreen|{img_coords}"
+                            elif dynamic_value == "0" and area_choice_value == 'fullscreen':
+                                new_area_str = f"{click_coords}|screenshot|{img_coords}"
+                            new_image[14] = new_area_str
 
                             # 更新描述字
                             if len(new_image) > 10:
@@ -7543,6 +7851,11 @@ class ImageRecognitionApp:
             # 保存引用，防止 screenshot_tk 被垃圾回收
             overlay._bg_img = screenshot_tk
 
+        if self.direct_box_selection:
+            area_choice.set('manual')
+            open_manual_overlay()
+            self.direct_box_selection = False
+
     def edit_step_name(self, event=None):
         selected_items = self.tree.selection()
         if not selected_items:
@@ -7989,10 +8302,14 @@ class ImageRecognitionApp:
             return
 
         selected_index = self.tree.index(selected_items[0])
+        
         try:
             img_path = self.image_list[selected_index][0]
-            original_image = Image.open(img_path)
+            original_image = Image.open(img_path).convert("RGBA")
 
+            values = self.tree.item(selected_items[0], 'values')
+            overlay_path = os.path.join('icon', 'Overlay.png')
+            
             def _update_when_ready():
                 w = self.preview_container.winfo_width() - 5
                 h = self.preview_container.winfo_height() - 5
@@ -8002,25 +8319,52 @@ class ImageRecognitionApp:
                     return
 
                 original_w, original_h = original_image.size
-
-                # 计算宽高比例
                 width_ratio = w / original_w
                 height_ratio = h / original_h
-
-                # 目标是放大到至少铺满一个方向，但不能超过容器
                 scale_ratio = max(width_ratio, height_ratio)
                 final_w = int(original_w * scale_ratio)
                 final_h = int(original_h * scale_ratio)
 
-                # 再限制不能超过容器
                 if final_w > w or final_h > h:
-                    scale_ratio = min(w / final_w, h / final_h)
-                    final_w = int(final_w * scale_ratio)
-                    final_h = int(final_h * scale_ratio)
+                    scale_ratio2 = min(w / final_w, h / final_h)
+                    final_w = int(final_w * scale_ratio2)
+                    final_h = int(final_h * scale_ratio2)
 
-                resized = original_image.resize((final_w, final_h), Image.Resampling.LANCZOS)
+                resized_original = original_image.resize((final_w, final_h), Image.Resampling.LANCZOS)
 
-                photo = ImageTk.PhotoImage(resized)
+                if len(values) > 2 and values[2] == "0.0" and os.path.exists(overlay_path):
+                    overlay_img = Image.open(overlay_path).convert("RGBA")
+
+                    # 保持宽高比，计算缩放比例，让叠加图至少铺满容器某一方向
+                    ov_w, ov_h = overlay_img.size
+                    scale_w = w / ov_w
+                    scale_h = h / ov_h
+                    scale = max(scale_w, scale_h)  # 铺满容器
+
+                    new_ov_w = int(ov_w * scale)
+                    new_ov_h = int(ov_h * scale)
+                    overlay_resized = overlay_img.resize((new_ov_w, new_ov_h), Image.Resampling.LANCZOS)
+
+                    # 创建和容器大小一样的透明画布
+                    canvas = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+
+                    # 底图居中放置
+                    offset_x = (w - final_w) // 2
+                    offset_y = (h - final_h) // 2
+                    canvas.paste(resized_original, (offset_x, offset_y))
+
+                    # 叠加图居中放置，可能会超出画布边界，裁剪效果自动实现
+                    ov_offset_x = (w - new_ov_w) // 2
+                    ov_offset_y = (h - new_ov_h) // 2
+
+                    # 叠加时用 paste 的 mask 参数确保透明度生效
+                    canvas.paste(overlay_resized, (ov_offset_x, ov_offset_y), overlay_resized)
+
+                    final_img = canvas
+                else:
+                    final_img = resized_original
+
+                photo = ImageTk.PhotoImage(final_img)
                 self.preview_image_label.config(image=photo)
                 self.preview_image_label.image = photo
                 self.update_label()
@@ -8031,6 +8375,7 @@ class ImageRecognitionApp:
             print(f"预览图像时出错: {e}")
             logging.error(f"预览图像时出错: {e}")
             self.preview_image_label.config(image='')
+
 
     def focus_on_step(self, index_or_event):
         """实现跟随步骤功能"""
