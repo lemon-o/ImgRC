@@ -36,7 +36,7 @@ from ttkbootstrap.widgets import Entry
 from pynput import mouse
 from pynput.mouse import Button, Controller
 
-CURRENT_VERSION = "v1.2.8" #版本号
+CURRENT_VERSION = "v1.2.9" #版本号
 
 def run_as_admin():
     if ctypes.windll.shell32.IsUserAnAdmin():
@@ -4496,28 +4496,34 @@ class ImageRecognitionApp:
             def start_drag(event):
                 dx, dy = event.x - center["x"], event.y - center["y"]
                 if dx*dx+dy*dy <= radius*radius:
-                    drag_data["x"], drag_data["y"] = dx, dy
+                    drag_data["x"], drag_data["y"] = event.x, event.y
+                    drag_data["orig_center_x"], drag_data["orig_center_y"] = center["x"], center["y"]
                     drag_data["dragging"] = True
-                    hide_overlay()
+                    hide_overlay()  # 隐藏遮罩和按钮
+                    for iid in items_ok + items_no:
+                        canvas.delete(iid)
+                    items_ok.clear()
+                    items_no.clear()
 
             def do_drag(event):
-                new_x = event.x - drag_data["x"]
-                new_y = event.y - drag_data["y"]
-                dx, dy = new_x - center["x"], new_y - center["y"]
-                
+                if not drag_data["dragging"]:
+                    return
+                dx = event.x - drag_data["x"]
+                dy = event.y - drag_data["y"]
+
+                new_x = drag_data["orig_center_x"] + dx
+                new_y = drag_data["orig_center_y"] + dy
+
                 # 移动圆形和十字线
                 for item in (circle, hline, vline):
-                    canvas.move(item, dx, dy)
-                
+                    canvas.move(item, new_x - center["x"], new_y - center["y"])
+
                 center["x"], center["y"] = new_x, new_y
-                
-                # 移动按钮
-                place_buttons()
-                
-                # 更新遮罩但不显示
-                create_mask()
-                
-                # 计算并更新偏移量
+
+                # 不刷新遮罩，避免延迟
+                # create_mask()  <-- 去掉这行
+
+                # 更新输入框内容
                 offset_x = new_x - orig_x
                 offset_y = new_y - orig_y
                 x_entry.delete(0, tk.END)
@@ -4527,7 +4533,8 @@ class ImageRecognitionApp:
 
             def on_release(event):
                 drag_data["dragging"] = False
-                update_overlay()
+                place_buttons()  # 画按钮
+                update_overlay() # 画遮罩
 
             # 修改事件绑定
             canvas.bind("<Motion>", on_enter)
@@ -5398,8 +5405,6 @@ class ImageRecognitionApp:
                 self.tree.focus(first_item_id)
                 self.tree.see(first_item_id)
 
-            self.unregister_global_hotkey()
-            self.register_global_hotkey()
             self.refresh_listbox_by_current_filter()
 
             if dialog_shown:
@@ -6208,8 +6213,6 @@ class ImageRecognitionApp:
             print("程序已重置为初始状态")
             logging.info("程序已重置为初始状态")      
             #  取消之前的全局热键， 注册新的全局热键
-            self.unregister_global_hotkey()
-            self.register_global_hotkey()
         except Exception as e:
             print(f"重置程序状态时出错: {e}")
             logging.error(f"重置程序状态时出错: {e}")
@@ -6544,6 +6547,10 @@ class ImageRecognitionApp:
         dialog.iconbitmap("icon/app.ico")
 
     def preset(self):
+        global open_set_condition_jump, open_image_rc_area
+        open_set_condition_jump = False
+        open_image_rc_area = False
+
         selected_items = self.tree.selection()
         if not selected_items:
             return
@@ -6604,15 +6611,15 @@ class ImageRecognitionApp:
 
         hub_btn = create_preset_button(
             row1_frame, "步骤枢纽", "hub",
-            "识图成功跳转到下一步骤，识图失败跳转到上一步骤，鼠标动作改为“无操作”"
+            "识图成功跳转到下一步骤，识图失败跳转到上一步骤，鼠标动作改为“无操作”，打开条件判断窗口"
         )
         top_btn = create_preset_button(
             row1_frame, "滚动至顶部", "top",
-            "关闭识图，设置键盘动作\"{home}\"，将当前聚焦的页面滚动到最顶部，并修改步骤名称"
+            "关闭识图，设置键盘动作\"{home}\"，将当前聚焦的页面滚动到最顶部，并修改步骤名称，鼠标动作改为“无操作"
         )
         bottom_btn = create_preset_button(
             row1_frame, "滚动至底部", "bottom",
-            "关闭识图，设置键盘动作\"{end}\"，将当前聚焦的页面滚动到最底部，并修改步骤名称"
+            "关闭识图，设置键盘动作\"{end}\"，将当前聚焦的页面滚动到最底部，并修改步骤名称，鼠标动作改为“无操作"
         )
 
         # 第二行按钮容器
@@ -6662,16 +6669,55 @@ class ImageRecognitionApp:
                 parts[0] = "none"
                 cur = cur[:4] + (":".join(parts),) + cur[5:]
 
+            if cur[10]:
+                cur = cur[:10] + ("",) + cur[11:]
+
             return cur
 
         def get_scroll_top_tuple():
             cur = _get_padded_tuple(4)
             cur = cur[:2] + ("0.0",) + ("{home}",) + cur[4:]
+
+            if cur[4]:
+                parts = str(cur[4]).split(":")
+                parts[0] = "none"
+                cur = cur[:4] + (":".join(parts),) + cur[5:]
+
+            if cur[10]:
+                cur = cur[:10] + ("",) + cur[11:]
+
+            if cur[1]:
+                add_name = " 滚动到顶部_"
+                check_name = " 滚动到底部_"
+                val = cur[1]
+                if check_name in val:
+                    val = val.replace(check_name, "")  # 删除 check_name
+                if add_name not in val:
+                    val = add_name + val               # 前面加上 add_name
+                cur = cur[:1] + (val,) + cur[2:]        # 更新 cur[1]
             return cur
 
         def get_scroll_bottom_tuple():
             cur = _get_padded_tuple(4)
             cur = cur[:2] + ("0.0",) + ("{end}",) + cur[4:]
+
+            if cur[4]:
+                parts = str(cur[4]).split(":")
+                parts[0] = "none"
+                cur = cur[:4] + (":".join(parts),) + cur[5:]
+
+            if cur[10]:
+                cur = cur[:10] + ("",) + cur[11:]
+
+            if cur[1]:
+                add_name = " 滚动到底部_"
+                check_name = " 滚动到顶部_"
+                val = cur[1]
+                if check_name in val:
+                    val = val.replace(check_name, "")  # 删除 check_name
+                if add_name not in val:
+                    val = add_name + val               # 前面加上 add_name
+                cur = cur[:1] + (val,) + cur[2:]        # 更新 cur[1]
             return cur
 
         def get_dynamic_click_tuple():
@@ -6701,12 +6747,14 @@ class ImageRecognitionApp:
             return cur
 
         def on_save():
+            global open_set_condition_jump, open_image_rc_area
             key = selected_preset[0]
             if not key:
                 tk.messagebox.showwarning("提示", "请先选择一个预设")
                 return
             if key == "hub":
                 new_tuple = get_hub_tuple()
+                open_set_condition_jump = True
             elif key == "top":
                 new_tuple = get_scroll_top_tuple()
             elif key == "bottom":
@@ -6715,7 +6763,7 @@ class ImageRecognitionApp:
                 new_tuple = get_dynamic_click_tuple()
                 # 保存后调用 image_rc_area
                 self.direct_box_selection = True
-                self.image_rc_area()
+                open_image_rc_area = True
             elif key == "disable_dynamic":
                 new_tuple = get_disable_dynamic_click_tuple()
             else:
@@ -6724,9 +6772,17 @@ class ImageRecognitionApp:
             self.tree.item(tree_item_id, values=new_tuple)
             self.refresh_listbox_by_current_filter()
             dialog.destroy()
+            open_window()
 
         def on_cancel():
             dialog.destroy()
+        
+        def open_window():
+            if open_set_condition_jump:
+                self.set_condition_jump()
+            
+            if open_image_rc_area:
+                self.image_rc_area()
 
         center_frame = ttk.Frame(action_frame)
         center_frame.pack()
@@ -8399,7 +8455,7 @@ class ImageRecognitionApp:
         """显示日志窗口（居中于主窗口）并实现实时更新"""    
         log_window = tk.Toplevel(self.root)
         log_window.withdraw()                     # 先隐藏
-        log_window.title("应用日志")
+        log_window.title("日志查看器")
         log_window.transient(self.root)
         log_window.grab_set()
     
