@@ -36,6 +36,7 @@ from ttkbootstrap.widgets import Entry
 from pynput import mouse
 from pynput.mouse import Button, Controller
 
+#查找tree每个索引的注释请查找：tree索引注释
 CURRENT_VERSION = "v1.2.9" #版本号
 
 def run_as_admin():
@@ -2190,12 +2191,12 @@ class ImageRecognitionApp:
                     selected_image[6],       # 6: 条件
                     selected_image[7],       # 7: 需跳转
                     selected_image[8],       # 8: 状态
-                    selected_image[9],      # 9: 【需禁用】目标
-                    selected_image[10],     # 10: 鼠标动作中文显示
-                    selected_image[11],       # 11: 条件2
+                    selected_image[9],       # 9: 【需禁用】目标
+                    selected_image[10],      # 10: 鼠标动作中文显示
+                    selected_image[11],      # 11: 条件2
                     selected_image[12],      # 12: 需跳转2
                     selected_image[13],      # 13: 需禁用2
-                    new_area_str,      # 13: 识图区域
+                    new_area_str,            # 14: 识图区域
                 )
 
                 # 4. 更新数据源
@@ -4169,567 +4170,632 @@ class ImageRecognitionApp:
         dialog.iconbitmap("icon/app.ico")
 
     def offset_coords(self):
-        
-        # 获取当前屏幕分辨率
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        self.get_screen_scale()
-
-        dialog = tk.Toplevel(self.root)
-        dialog.withdraw()                     # 先隐藏
-        dialog.title("设置偏移量")
-        dialog.transient(self.root)
-        dialog.grab_set()
-
-        # 创建输入框
-        input_frame = tk.Frame(dialog)
-        input_frame.pack(padx=10, pady=10)
-
-        tk.Label(input_frame, text="X:").grid(row=0, column=0, padx=(10,0), pady=(20,0), sticky='e')
-        x_entry = tk.Entry(input_frame, width=5)
-        x_entry.insert(0, "0")
-        x_entry.grid(row=0, column=1, padx=(0,0), pady=(20,0))
-
-        tk.Label(input_frame, text="Y:").grid(row=0, column=2, padx=(5,0), pady=(20,0), sticky='e')
-        y_entry = tk.Entry(input_frame, width=5)
-        y_entry.insert(0, "0")
-        y_entry.grid(row=0, column=3, padx=(0,10), pady=(20,0))
-
-        # 存储要偏移的步骤索引
-        selected_indices = []
-
-        def select_steps():
-            sel_dialog = tk.Toplevel(dialog)
-            sel_dialog.withdraw()  # 先隐藏窗口
-            sel_dialog.title("选择更多步骤")
-            sel_dialog.transient(dialog)
-            sel_dialog.grab_set()
-
-            # 获取初始选中的索引（来自 selected_indices 或 Treeview 当前选中项）
-            if selected_indices:
-                initial = set(selected_indices)
-            else:
-                initial = set(self.get_selected_original_indices())
             
-            # 列表框及滚动条
-            list_frame = tk.Frame(sel_dialog)
-            list_frame.pack(padx=10, pady=(10, 0), fill='both', expand=True)
+            # 获取当前屏幕分辨率
+            screen_width = self.root.winfo_screenwidth()
+            screen_height = self.root.winfo_screenheight()
+            self.get_screen_scale()
 
-            scrollbar = tk.Scrollbar(list_frame, orient='vertical')
-            listbox = tk.Listbox(list_frame, selectmode='multiple', yscrollcommand=scrollbar.set)
-            scrollbar.config(command=listbox.yview)
-            scrollbar.pack(side='right', fill='y')
-            listbox.pack(side='left', fill='both', expand=True)
+            dialog = tk.Toplevel(self.root)
+            dialog.withdraw()                     # 先隐藏
+            dialog.title("设置偏移量")
+            dialog.transient(self.root)
+            dialog.grab_set()
 
-            # 支持 Shift 范围选择
-            # 设置初始选中项（对应 Treeview 的选中项）
-            for idx in initial:
-                listbox.selection_set(idx)
+            # 创建输入框
+            input_frame = tk.Frame(dialog)
+            input_frame.pack(padx=10, pady=10)
 
-            # 记录初始索引（Treeview 的第一个选中项）
-            initial_index = next(iter(initial)) if initial else None
-            last_click = {'index': initial_index}
+            tk.Label(input_frame, text="X:").grid(row=0, column=0, padx=(10,0), pady=(20,0), sticky='e')
+            x_entry = tk.Entry(input_frame, width=5)
+            x_entry.insert(0, "0")
+            x_entry.grid(row=0, column=1, padx=(0,0), pady=(20,0))
 
-            def on_click(event):
-                idx = listbox.nearest(event.y)
-                shift_pressed = (event.state & 0x0001) != 0  # 检测是否按住 Shift
+            tk.Label(input_frame, text="Y:").grid(row=0, column=2, padx=(5,0), pady=(20,0), sticky='e')
+            y_entry = tk.Entry(input_frame, width=5)
+            y_entry.insert(0, "0")
+            y_entry.grid(row=0, column=3, padx=(0,10), pady=(20,0))
 
-                # 如果点击的是初始选中的项目，不允许取消选中
-                if idx in initial:
-                    return "break"
+            # 存储要偏移的步骤索引
+            selected_indices = []
 
-                if shift_pressed and last_click['index'] is not None:
-                    # 判断当前点击位置是在初始索引的左边还是右边
-                    if idx < last_click['index']:
-                        # 只能选择左边（从 idx 到 initial_index）
-                        listbox.selection_clear(0, tk.END)  # 先清空所有选择
-                        listbox.selection_set(idx, last_click['index'])
-                        # 确保初始选中的项目保持选中
-                        for i in initial:
-                            listbox.selection_set(i)
-                    else:
-                        # 只能选择右边（从 initial_index 到 idx）
-                        listbox.selection_clear(0, tk.END)
-                        listbox.selection_set(last_click['index'], idx)
-                        # 确保初始选中的项目保持选中
-                        for i in initial:
-                            listbox.selection_set(i)
+            def select_steps():
+                sel_dialog = tk.Toplevel(dialog)
+                sel_dialog.withdraw()  # 先隐藏窗口
+                sel_dialog.title("选择更多步骤")
+                sel_dialog.transient(dialog)
+                sel_dialog.grab_set()
+
+                # 获取初始选中的索引（来自 selected_indices 或 Treeview 当前选中项）
+                if selected_indices:
+                    initial = set(selected_indices)
                 else:
-                    # 普通点击：切换选中状态（但不能取消初始选中的项目）
-                    if listbox.selection_includes(idx) and idx not in initial:
-                        listbox.selection_clear(idx)
-                    elif idx not in initial:
-                        listbox.selection_set(idx)
-                    last_click['index'] = idx  # 更新最后点击的索引
-                return "break"
+                    initial = set(self.get_selected_original_indices())
+                
+                # 列表框及滚动条
+                list_frame = tk.Frame(sel_dialog)
+                list_frame.pack(padx=10, pady=(10, 0), fill='both', expand=True)
 
-            listbox.bind('<Button-1>', on_click)
+                scrollbar = tk.Scrollbar(list_frame, orient='vertical')
+                listbox = tk.Listbox(list_frame, selectmode='multiple', yscrollcommand=scrollbar.set)
+                scrollbar.config(command=listbox.yview)
+                scrollbar.pack(side='right', fill='y')
+                listbox.pack(side='left', fill='both', expand=True)
 
-            # 插入步骤
-            for idx, image in enumerate(self.image_list):
-                listbox.insert('end', image[1])
-                if idx in initial:
+                # 支持 Shift 范围选择
+                # 设置初始选中项（对应 Treeview 的选中项）
+                for idx in initial:
                     listbox.selection_set(idx)
 
-            # 如果有选中的项目，滚动到第一个选中的项目上方两行
-            if initial:
-                first_selected = min(initial)
-                # 计算向上偏移2行的位置（最小为0）
-                scroll_pos = max(0, first_selected - 2)
-                listbox.see(scroll_pos)
+                # 记录初始索引（Treeview 的第一个选中项）
+                initial_index = next(iter(initial)) if initial else None
+                last_click = {'index': initial_index}
 
-            # 全选复选框
-            all_var = tk.BooleanVar(value=False)
-            def toggle_all():
-                if all_var.get():
-                    listbox.select_set(0, 'end')
-                else:
-                    listbox.select_clear(0, 'end')
-            all_check = ttk.Checkbutton(sel_dialog, text="全选", variable=all_var, command=toggle_all, bootstyle="secondary")
-            all_check.pack(anchor='w', padx=10, pady=(5, 0))
+                def on_click(event):
+                    idx = listbox.nearest(event.y)
+                    shift_pressed = (event.state & 0x0001) != 0  # 检测是否按住 Shift
 
-            # 应用/取消按钮区域
-            btn_frame2 = tk.Frame(sel_dialog)
-            btn_frame2.pack(pady=10, fill='x')
-            ok_btn = ttk.Button(btn_frame2, text="应用", command=lambda: (set_selected(), sel_dialog.destroy()), bootstyle="primary-outline")
-            ok_btn.pack(side=tk.RIGHT, padx=5)
-            cancel_btn = ttk.Button(btn_frame2, text="取消", command=sel_dialog.destroy, bootstyle="primary-outline")
-            cancel_btn.pack(side=tk.RIGHT)
+                    # 如果点击的是初始选中的项目，不允许取消选中
+                    if idx in initial:
+                        return "break"
 
-            def set_selected():
-                nonlocal selected_indices
-                selected_indices = list(listbox.curselection())
+                    if shift_pressed and last_click['index'] is not None:
+                        # 判断当前点击位置是在初始索引的左边还是右边
+                        if idx < last_click['index']:
+                            # 只能选择左边（从 idx 到 initial_index）
+                            listbox.selection_clear(0, tk.END)  # 先清空所有选择
+                            listbox.selection_set(idx, last_click['index'])
+                            # 确保初始选中的项目保持选中
+                            for i in initial:
+                                listbox.selection_set(i)
+                        else:
+                            # 只能选择右边（从 initial_index 到 idx）
+                            listbox.selection_clear(0, tk.END)
+                            listbox.selection_set(last_click['index'], idx)
+                            # 确保初始选中的项目保持选中
+                            for i in initial:
+                                listbox.selection_set(i)
+                    else:
+                        # 普通点击：切换选中状态（但不能取消初始选中的项目）
+                        if listbox.selection_includes(idx) and idx not in initial:
+                            listbox.selection_clear(idx)
+                        elif idx not in initial:
+                            listbox.selection_set(idx)
+                        last_click['index'] = idx  # 更新最后点击的索引
+                    return "break"
 
-            # 居中对话框
-            sel_dialog.update_idletasks()
-            pw, ph = dialog.winfo_width(), dialog.winfo_height()
-            px, py = dialog.winfo_x(), dialog.winfo_y()
-            w, h = sel_dialog.winfo_width(), sel_dialog.winfo_height()
-            sel_dialog.geometry(f"{w}x{h}+{px + (pw - w) // 2}+{py + (ph - h) // 2}")
+                listbox.bind('<Button-1>', on_click)
 
-            sel_dialog.iconbitmap("icon/app.ico")
-            sel_dialog.deiconify()  # 一次性显示在正确位置
+                # 插入步骤
+                for idx, image in enumerate(self.image_list):
+                    listbox.insert('end', image[1])
+                    if idx in initial:
+                        listbox.selection_set(idx)
 
-        # 自动计算偏移量
-        def auto_offset():
-            # —— 1. 解析原始坐标 —— 
-            target_index = self.get_selected_original_index()
-            if target_index is None:
-                messagebox.showwarning("提示", "请先选中一个步骤再设置偏移！")
-                return
-            
-            mouse_info = self.image_list[target_index][4]
-            if not mouse_info or ":" not in mouse_info:
-                messagebox.showerror("错误", "当前记录没有有效的点击坐标！")
-                return
-            try:
-                orig_x, orig_y = map(int, mouse_info.split(":")[1].split(","))
-                off_set_x, off_set_y = map(int, mouse_info.split(":")[4].split(","))
-                click_x = orig_x + off_set_x
-                click_y = orig_y + off_set_y
+                # 如果有选中的项目，滚动到第一个选中的项目上方两行
+                if initial:
+                    first_selected = min(initial)
+                    # 计算向上偏移2行的位置（最小为0）
+                    scroll_pos = max(0, first_selected - 2)
+                    listbox.see(scroll_pos)
+
+                # 全选复选框
+                all_var = tk.BooleanVar(value=False)
+                def toggle_all():
+                    if all_var.get():
+                        listbox.select_set(0, 'end')
+                    else:
+                        listbox.select_clear(0, 'end')
+                all_check = ttk.Checkbutton(sel_dialog, text="全选", variable=all_var, command=toggle_all, bootstyle="secondary")
+                all_check.pack(anchor='w', padx=10, pady=(5, 0))
+
+                # 应用/取消按钮区域
+                btn_frame2 = tk.Frame(sel_dialog)
+                btn_frame2.pack(pady=10, fill='x')
+                ok_btn = ttk.Button(btn_frame2, text="应用", command=lambda: (set_selected(), sel_dialog.destroy()), bootstyle="primary-outline")
+                ok_btn.pack(side=tk.RIGHT, padx=5)
+                cancel_btn = ttk.Button(btn_frame2, text="取消", command=sel_dialog.destroy, bootstyle="primary-outline")
+                cancel_btn.pack(side=tk.RIGHT)
+
+                def set_selected():
+                    nonlocal selected_indices
+                    selected_indices = list(listbox.curselection())
+
+                # 居中对话框
+                sel_dialog.update_idletasks()
+                pw, ph = dialog.winfo_width(), dialog.winfo_height()
+                px, py = dialog.winfo_x(), dialog.winfo_y()
+                w, h = sel_dialog.winfo_width(), sel_dialog.winfo_height()
+                sel_dialog.geometry(f"{w}x{h}+{px + (pw - w) // 2}+{py + (ph - h) // 2}")
+
+                sel_dialog.iconbitmap("icon/app.ico")
+                sel_dialog.deiconify()  # 一次性显示在正确位置
+
+            # 自动计算偏移量
+            def auto_offset():
+                # —— 1. 解析原始坐标 —— 
+                target_index = self.get_selected_original_index()
+                if target_index is None:
+                    messagebox.showwarning("提示", "请先选中一个步骤再设置偏移！")
+                    return
                 
-            except:
-                messagebox.showerror("错误", "无法解析点击坐标！")
-                return
+                mouse_info = self.image_list[target_index][4]
+                if not mouse_info or ":" not in mouse_info:
+                    messagebox.showerror("错误", "当前记录没有有效的点击坐标！")
+                    return
+                try:
+                    orig_x, orig_y = map(int, mouse_info.split(":")[1].split(","))
+                    off_set_x, off_set_y = map(int, mouse_info.split(":")[4].split(","))
+                    click_x = orig_x + off_set_x
+                    click_y = orig_y + off_set_y
+                    
+                except:
+                    messagebox.showerror("错误", "无法解析点击坐标！")
+                    return
 
-            # —— 2. 计算屏幕尺寸和圆半径 —— 
-            screen_width, screen_height = pyautogui.size()
-            diameter = screen_height // 30
-            radius = diameter // 2
+                # —— 2. 计算屏幕尺寸和圆半径 —— 
+                screen_width, screen_height = pyautogui.size()
+                diameter = screen_height // 30
+                radius = diameter // 2
 
-            # —— 3. 隐藏主窗口并延迟创建覆盖层 ——
-            self.root.withdraw()  # 隐藏主窗口
-            # 延迟200ms确保主窗口完全隐藏后再创建覆盖层
-            self.root.after(200, lambda: _create_overlay(
-                root=self.root,
-                orig_x=click_x,
-                orig_y=click_y,
-                radius=radius,
-                screen_width=screen_width,
-                screen_height=screen_height,
-                x_entry=x_entry,  # 传入输入框引用
-                y_entry=y_entry   # 传入输入框引用
-            ))
+                # —— 3. 隐藏主窗口并延迟创建覆盖层 ——
+                self.root.withdraw()  # 隐藏主窗口
+                # 延迟200ms确保主窗口完全隐藏后再创建覆盖层
+                self.root.after(200, lambda: _create_overlay(
+                    root=self.root,
+                    orig_x=click_x,
+                    orig_y=click_y,
+                    radius=radius,
+                    screen_width=screen_width,
+                    screen_height=screen_height,
+                    x_entry=x_entry,  # 传入输入框引用
+                    y_entry=y_entry   # 传入输入框引用
+                ))
 
-        def _create_overlay(root, orig_x, orig_y, radius, screen_width, screen_height, x_entry, y_entry):
-            # 获取屏幕截图
-            screenshot_img = ImageGrab.grab()
-            screenshot_tk = ImageTk.PhotoImage(screenshot_img)
-            
-            # 创建覆盖层
-            overlay = tk.Toplevel(root)
-            overlay.attributes("-fullscreen", True)
-            overlay.attributes("-topmost", True)
-            overlay.grab_set()
-            
-            # 创建Canvas
-            canvas = tk.Canvas(
-                overlay,
-                width=screen_width,
-                height=screen_height,
-                highlightthickness=0
-            )
-            canvas.pack(fill="both", expand=True)
-            
-            # 显示截图背景
-            canvas.create_image(0, 0, image=screenshot_tk, anchor="nw")
-            
-            # 绘制蓝色圆和十字
-            circle = canvas.create_oval(
-                orig_x-radius, orig_y-radius,
-                orig_x+radius, orig_y+radius,
-                outline="#0773fc", width=2
-            )
-            hline = canvas.create_line(
-                orig_x-radius, orig_y,
-                orig_x+radius, orig_y,
-                fill="#0773fc", width=1
-            )
-            vline = canvas.create_line(
-                orig_x, orig_y-radius,
-                orig_x, orig_y+radius,
-                fill="#0773fc", width=1
-            )
-
-            # 按钮配置
-            btn_size = 20
-            offset = 5  # 距圆形偏移
-            confirm_tag = 'btn_ok'
-            cancel_tag = 'btn_no'
-            items_ok = []
-            items_no = []
-            button_exclusion_areas = []
-
-            # 定义center变量和拖动状态
-            center = {"x": orig_x, "y": orig_y}
-            drag_data = {"x": 0, "y": 0, "dragging": False}
-            overlay_image_id = None
-            mask_tk = None
-
-            def draw_small_btn(x, y, tag, text):
-                bg = canvas.create_rectangle(x, y, x+btn_size, y+btn_size,
-                                            fill='white', outline='black', tags=tag)
-                txt = canvas.create_text(x+btn_size/2, y+btn_size/2,
-                                        text=text, tags=tag)
-                return [bg, txt]
-
-            def place_buttons():
-                # 删除旧按钮
-                for iid in items_ok + items_no:
-                    canvas.delete(iid)
-                items_ok.clear()
-                items_no.clear()
+            def _create_overlay(root, orig_x, orig_y, radius, screen_width, screen_height, x_entry, y_entry):
+                # 获取屏幕截图
+                screenshot_img = ImageGrab.grab()
+                screenshot_tk = ImageTk.PhotoImage(screenshot_img)
                 
-                # 计算按钮位置（放在圆形正下方）
-                total_width = btn_size * 2 + 10
-                x_base = center["x"] - total_width//2
-                y_base = center["y"] + radius + offset
+                # 创建覆盖层
+                overlay = tk.Toplevel(root)
+                overlay.attributes("-fullscreen", True)
+                overlay.attributes("-topmost", True)
+                overlay.grab_set()
                 
-                # 确保按钮不会超出屏幕
-                x_base = max(x_base, 0)
-                y_base = min(y_base, screen_height - btn_size)
+                # 创建Canvas
+                canvas = tk.Canvas(
+                    overlay,
+                    width=screen_width,
+                    height=screen_height,
+                    highlightthickness=0
+                )
+                canvas.pack(fill="both", expand=True)
                 
-                # 绘制按钮
-                items_no.extend(draw_small_btn(x_base, y_base, cancel_tag, 'x'))
-                items_ok.extend(draw_small_btn(x_base + btn_size + 10, y_base, confirm_tag, '√'))
+                # 显示截图背景
+                canvas.create_image(0, 0, image=screenshot_tk, anchor="nw")
                 
-                # 更新排除区：用于遮罩挖洞
-                button_exclusion_areas.clear()
-                for bg_id in ([items_no[0]] if items_no else []) + ([items_ok[0]] if items_ok else []):
-                    bbox = canvas.bbox(bg_id)
-                    if bbox:
-                        button_exclusion_areas.append(tuple(bbox))
+                # 绘制蓝色圆和十字
+                circle = canvas.create_oval(
+                    orig_x-radius, orig_y-radius,
+                    orig_x+radius, orig_y+radius,
+                    outline="#0773fc", width=2
+                )
+                hline = canvas.create_line(
+                    orig_x-radius, orig_y,
+                    orig_x+radius, orig_y,
+                    fill="#0773fc", width=1
+                )
+                vline = canvas.create_line(
+                    orig_x, orig_y-radius,
+                    orig_x, orig_y+radius,
+                    fill="#0773fc", width=1
+                )
 
-            def create_mask():
-                nonlocal mask_tk
-                # 创建新的遮罩图像
-                mask = Image.new('RGBA', (screen_width, screen_height), (0, 0, 0, 128))
-                draw = ImageDraw.Draw(mask)
-                
-                # 挖空圆形区域
-                l, t, r, b = center["x"]-radius, center["y"]-radius, center["x"]+radius, center["y"]+radius
-                draw.ellipse([l, t, r, b], fill=(0, 0, 0, 0))
-                
-                # 挖空按钮区域
-                for excl in button_exclusion_areas:
-                    ex1, ey1, ex2, ey2 = excl
-                    draw.rectangle([ex1, ey1, ex2, ey2], fill=(0, 0, 0, 0))
-                
-                # 转换为Tkinter图像
-                mask_tk = ImageTk.PhotoImage(mask)
-                return mask_tk
+                # 按钮配置
+                btn_size = 20
+                offset = 5  # 距圆形偏移
+                confirm_tag = 'btn_ok'
+                cancel_tag = 'btn_no'
+                items_ok = []
+                items_no = []
+                button_exclusion_areas = []
 
-            def show_overlay():
-                nonlocal overlay_image_id
-                if not drag_data["dragging"] and mask_tk:
-                    overlay_image_id = canvas.create_image(0, 0, image=mask_tk, anchor='nw')
-                    overlay._overlay_img = mask_tk  # 保持引用
-                    # 确保圆形和按钮在最上层
-                    canvas.tag_raise(circle)
-                    canvas.tag_raise(hline)
-                    canvas.tag_raise(vline)
-                    for iid in items_no + items_ok:
-                        canvas.tag_raise(iid)
+                # 定义center变量和拖动状态
+                center = {"x": orig_x, "y": orig_y}
+                drag_data = {"x": 0, "y": 0, "dragging": False}
+                overlay_image_id = None
+                mask_tk = None
 
-            def hide_overlay():
-                nonlocal overlay_image_id
-                if overlay_image_id is not None:
-                    canvas.delete(overlay_image_id)
-                    overlay_image_id = None
+                def draw_small_btn(x, y, tag, text):
+                    bg = canvas.create_rectangle(x, y, x+btn_size, y+btn_size,
+                                                fill='white', outline='black', tags=tag)
+                    txt = canvas.create_text(x+btn_size/2, y+btn_size/2,
+                                            text=text, tags=tag)
+                    return [bg, txt]
 
-            def update_overlay():
-                create_mask()
-                if drag_data["dragging"]:
-                    hide_overlay()
-                else:
-                    show_overlay()
-
-            # 初始化按钮和遮罩
-            place_buttons()
-            create_mask()
-            show_overlay()
-
-            def on_enter(event):
-                dx, dy = event.x - center["x"], event.y - center["y"]
-                canvas.config(cursor="fleur" if dx*dx+dy*dy <= radius*radius else "")
-
-            def start_drag(event):
-                dx, dy = event.x - center["x"], event.y - center["y"]
-                if dx*dx+dy*dy <= radius*radius:
-                    drag_data["x"], drag_data["y"] = event.x, event.y
-                    drag_data["orig_center_x"], drag_data["orig_center_y"] = center["x"], center["y"]
-                    drag_data["dragging"] = True
-                    hide_overlay()  # 隐藏遮罩和按钮
+                def place_buttons():
+                    # 删除旧按钮
                     for iid in items_ok + items_no:
                         canvas.delete(iid)
                     items_ok.clear()
                     items_no.clear()
+                    
+                    # 计算按钮位置（放在圆形正下方）
+                    total_width = btn_size * 2 + 10
+                    x_base = center["x"] - total_width//2
+                    y_base = center["y"] + radius + offset
+                    
+                    # 确保按钮不会超出屏幕
+                    x_base = max(x_base, 0)
+                    y_base = min(y_base, screen_height - btn_size)
+                    
+                    # 绘制按钮
+                    items_no.extend(draw_small_btn(x_base, y_base, cancel_tag, 'x'))
+                    items_ok.extend(draw_small_btn(x_base + btn_size + 10, y_base, confirm_tag, '√'))
+                    
+                    # 更新排除区：用于遮罩挖洞
+                    button_exclusion_areas.clear()
+                    for bg_id in ([items_no[0]] if items_no else []) + ([items_ok[0]] if items_ok else []):
+                        bbox = canvas.bbox(bg_id)
+                        if bbox:
+                            button_exclusion_areas.append(tuple(bbox))
 
-            def do_drag(event):
-                if not drag_data["dragging"]:
-                    return
-                dx = event.x - drag_data["x"]
-                dy = event.y - drag_data["y"]
+                def create_mask():
+                    nonlocal mask_tk
+                    # 创建新的遮罩图像
+                    mask = Image.new('RGBA', (screen_width, screen_height), (0, 0, 0, 128))
+                    draw = ImageDraw.Draw(mask)
+                    
+                    # 挖空圆形区域
+                    l, t, r, b = center["x"]-radius, center["y"]-radius, center["x"]+radius, center["y"]+radius
+                    draw.ellipse([l, t, r, b], fill=(0, 0, 0, 0))
+                    
+                    # 挖空按钮区域
+                    for excl in button_exclusion_areas:
+                        ex1, ey1, ex2, ey2 = excl
+                        draw.rectangle([ex1, ey1, ex2, ey2], fill=(0, 0, 0, 0))
+                    
+                    # 转换为Tkinter图像
+                    mask_tk = ImageTk.PhotoImage(mask)
+                    return mask_tk
 
-                new_x = drag_data["orig_center_x"] + dx
-                new_y = drag_data["orig_center_y"] + dy
+                def show_overlay():
+                    nonlocal overlay_image_id
+                    if not drag_data["dragging"] and mask_tk:
+                        overlay_image_id = canvas.create_image(0, 0, image=mask_tk, anchor='nw')
+                        overlay._overlay_img = mask_tk  # 保持引用
+                        # 确保圆形和按钮在最上层
+                        canvas.tag_raise(circle)
+                        canvas.tag_raise(hline)
+                        canvas.tag_raise(vline)
+                        for iid in items_no + items_ok:
+                            canvas.tag_raise(iid)
 
-                # 移动圆形和十字线
-                for item in (circle, hline, vline):
-                    canvas.move(item, new_x - center["x"], new_y - center["y"])
+                def hide_overlay():
+                    nonlocal overlay_image_id
+                    if overlay_image_id is not None:
+                        canvas.delete(overlay_image_id)
+                        overlay_image_id = None
 
-                center["x"], center["y"] = new_x, new_y
+                def update_overlay():
+                    create_mask()
+                    if drag_data["dragging"]:
+                        hide_overlay()
+                    else:
+                        show_overlay()
 
-                # 不刷新遮罩，避免延迟
-                # create_mask()  <-- 去掉这行
+                # 初始化按钮和遮罩
+                place_buttons()
+                create_mask()
+                show_overlay()
 
-                # 更新输入框内容
-                offset_x = new_x - orig_x
-                offset_y = new_y - orig_y
-                x_entry.delete(0, tk.END)
-                x_entry.insert(0, str(offset_x))
-                y_entry.delete(0, tk.END)
-                y_entry.insert(0, str(offset_y))
+                def on_enter(event):
+                    dx, dy = event.x - center["x"], event.y - center["y"]
+                    canvas.config(cursor="fleur" if dx*dx+dy*dy <= radius*radius else "")
 
-            def on_release(event):
-                drag_data["dragging"] = False
-                place_buttons()  # 画按钮
-                update_overlay() # 画遮罩
+                def start_drag(event):
+                    dx, dy = event.x - center["x"], event.y - center["y"]
+                    if dx*dx+dy*dy <= radius*radius:
+                        drag_data["x"], drag_data["y"] = event.x, event.y
+                        drag_data["orig_center_x"], drag_data["orig_center_y"] = center["x"], center["y"]
+                        drag_data["dragging"] = True
+                        hide_overlay()  # 隐藏遮罩和按钮
+                        for iid in items_ok + items_no:
+                            canvas.delete(iid)
+                        items_ok.clear()
+                        items_no.clear()
 
-            # 修改事件绑定
-            canvas.bind("<Motion>", on_enter)
-            canvas.bind("<ButtonPress-1>", start_drag)
-            canvas.bind("<B1-Motion>", do_drag)
-            canvas.bind("<ButtonRelease-1>", on_release)
+                def do_drag(event):
+                    if not drag_data["dragging"]:
+                        return
+                    dx = event.x - drag_data["x"]
+                    dy = event.y - drag_data["y"]
 
-            # 按钮事件处理
-            def confirm_and_close():
-                overlay.grab_release()
-                overlay.destroy()
-                root.deiconify()
+                    new_x = drag_data["orig_center_x"] + dx
+                    new_y = drag_data["orig_center_y"] + dy
 
-            def cancel_and_close():
-                x_entry.delete(0, tk.END)
-                x_entry.insert(0, "0")
-                y_entry.delete(0, tk.END)
-                y_entry.insert(0, "0")
-                overlay.grab_release()
-                overlay.destroy()
-                root.deiconify()
+                    # 移动圆形和十字线
+                    for item in (circle, hline, vline):
+                        canvas.move(item, new_x - center["x"], new_y - center["y"])
 
-            canvas.tag_bind(confirm_tag, "<Button-1>", lambda e: confirm_and_close())
-            canvas.tag_bind(cancel_tag, "<Button-1>", lambda e: cancel_and_close())
-            overlay.bind("<Escape>", lambda e: cancel_and_close())
+                    center["x"], center["y"] = new_x, new_y
 
-            # 保存图像引用
-            overlay._screenshot = screenshot_tk
+                    # 不刷新遮罩，避免延迟
+                    # create_mask()  <-- 去掉这行
 
-            # 初始更新遮罩
-            create_mask()
+                    # 更新输入框内容
+                    offset_x = new_x - orig_x
+                    offset_y = new_y - orig_y
+                    x_entry.delete(0, tk.END)
+                    x_entry.insert(0, str(offset_x))
+                    y_entry.delete(0, tk.END)
+                    y_entry.insert(0, str(offset_y))
 
-        def on_save():
-            try:
-                entry_offset_x = int(x_entry.get())
-                entry_offset_y = int(y_entry.get())
-            except ValueError:
-                messagebox.showerror("错误", "请输入有效的整数偏移量。")
-                return
+                def on_release(event):
+                    drag_data["dragging"] = False
+                    place_buttons()  # 画按钮
+                    update_overlay() # 画遮罩
 
-            def process_mouse_info(mouse_info):
-                if mouse_info:
-                    parts = mouse_info.split(":")
-                    if len(parts) >= 5:
-                        current_action, current_coords = parts[0], parts[1]
-                        current_dynamic = parts[2]
-                        current_count = parts[3]
-                        current_offset_info = parts[4] if len(parts) > 4 else "0,0"
+                # 修改事件绑定
+                canvas.bind("<Motion>", on_enter)
+                canvas.bind("<ButtonPress-1>", start_drag)
+                canvas.bind("<B1-Motion>", do_drag)
+                canvas.bind("<ButtonRelease-1>", on_release)
+
+                # 按钮事件处理
+                def confirm_and_close():
+                    overlay.grab_release()
+                    overlay.destroy()
+                    root.deiconify()
+
+                def cancel_and_close():
+                    x_entry.delete(0, tk.END)
+                    x_entry.insert(0, "0")
+                    y_entry.delete(0, tk.END)
+                    y_entry.insert(0, "0")
+                    overlay.grab_release()
+                    overlay.destroy()
+                    root.deiconify()
+
+                canvas.tag_bind(confirm_tag, "<Button-1>", lambda e: confirm_and_close())
+                canvas.tag_bind(cancel_tag, "<Button-1>", lambda e: cancel_and_close())
+                overlay.bind("<Escape>", lambda e: cancel_and_close())
+
+                # 保存图像引用
+                overlay._screenshot = screenshot_tk
+
+                # 初始更新遮罩
+                create_mask()
+
+            def process_region_offset(region_info, offset_x, offset_y):
+                """处理识图区域偏移"""
+                if not region_info:
+                    return region_info
+                
                 try:
-                    x, y = map(int, current_coords.split(","))
-                    off_x, off_y = map(int, current_offset_info.split(","))
-                    new_x, new_y = x + entry_offset_x + off_x, y + entry_offset_y + off_y
-                    if new_x < 0 or new_y < 0: return "NEGATIVE"
-                    if new_x > screen_width or new_y > screen_height: return "OUT_OF_BOUNDS"
-                except:
-                    return None
-                new_info = f"{current_action}:{current_coords}:{current_dynamic}"
-                new_info += f":{current_count}"
-                new_off_x = entry_offset_x + off_x
-                new_off_y = entry_offset_y + off_y
-                new_offset_info = f"{new_off_x},{new_off_y}"
-                new_info += f":{new_offset_info}"
-                return new_info
+                    parts = region_info.split('|')
+                    if len(parts) >= 2:
+                        region_coords = parts[0]  # 第一部分：坐标
+                        method_type = parts[1]    # 第二部分：方法类型
+                        
+                        # 检查方法类型是否为 manual 或 screenshot
+                        if method_type.lower() in ['manual', 'screenshot']:
+                            # 解析坐标：x1,y1,x2,y2
+                            coords = region_coords.split(',')
+                            if len(coords) == 4:
+                                x1, y1, x2, y2 = map(int, coords)
+                                
+                                # 应用偏移量
+                                new_x1 = x1 + offset_x
+                                new_y1 = y1 + offset_y
+                                new_x2 = x2 + offset_x
+                                new_y2 = y2 + offset_y
+                                
+                                # 重新构建区域信息
+                                new_coords = f"{new_x1},{new_y1},{new_x2},{new_y2}"
+                                new_region_info = '|'.join([new_coords] + parts[1:])
+                                
+                                return new_region_info
+                except (ValueError, IndexError):
+                    # 如果解析失败，返回原始值
+                    pass
+                
+                return region_info
 
-            targets = selected_indices if selected_indices else self.get_selected_original_indices()
-            if not targets:
-                return
-
-            for i in targets:
-                image = self.image_list[i]
-                new_info = process_mouse_info(image[4])
-                if new_info == "NEGATIVE":
-                    messagebox.showerror("错误", "偏移结果存在负点击位置，请重新设置偏移量。")
+            def on_save():
+                try:
+                    entry_offset_x = int(x_entry.get())
+                    entry_offset_y = int(y_entry.get())
+                except ValueError:
+                    messagebox.showerror("错误", "请输入有效的整数偏移量。")
                     return
-                if new_info == "OUT_OF_BOUNDS":
-                    messagebox.showerror("错误", f"偏移结果超出屏幕范围({screen_width}x{screen_height})，请重新设置偏移量。")
+
+                # 获取是否要同时偏移识图区域
+                offset_region = offset_region_var.get()
+
+                def process_mouse_info(mouse_info):
+                    if mouse_info:
+                        parts = mouse_info.split(":")
+                        if len(parts) >= 5:
+                            current_action, current_coords = parts[0], parts[1]
+                            current_dynamic = parts[2]
+                            current_count = parts[3]
+                            current_offset_info = parts[4] if len(parts) > 4 else "0,0"
+                    try:
+                        x, y = map(int, current_coords.split(","))
+                        off_x, off_y = map(int, current_offset_info.split(","))
+                        new_x, new_y = x + entry_offset_x + off_x, y + entry_offset_y + off_y
+                        if new_x < 0 or new_y < 0: return "NEGATIVE"
+                        if new_x > screen_width or new_y > screen_height: return "OUT_OF_BOUNDS"
+                    except:
+                        return None
+                    new_info = f"{current_action}:{current_coords}:{current_dynamic}"
+                    new_info += f":{current_count}"
+                    new_off_x = entry_offset_x + off_x
+                    new_off_y = entry_offset_y + off_y
+                    new_offset_info = f"{new_off_x},{new_off_y}"
+                    new_info += f":{new_offset_info}"
+                    return new_info
+
+                targets = selected_indices if selected_indices else self.get_selected_original_indices()
+                if not targets:
                     return
-                if new_info:
-                    self.image_list[i] = (*image[:4], new_info, *image[5:])
 
-                    orig_x, orig_y = map(int, image[4].split(":")[1].split(","))
-                    off_set_x, off_set_y = map(int, image[4].split(":")[4].split(","))
-                    click_x = orig_x + off_set_x
-                    click_y = orig_y + off_set_y
+                for i in targets:
+                    image = self.image_list[i]
+                    new_info = process_mouse_info(image[4])
+                    if new_info == "NEGATIVE":
+                        messagebox.showerror("错误", "偏移结果存在负点击位置，请重新设置偏移量。")
+                        return
+                    if new_info == "OUT_OF_BOUNDS":
+                        messagebox.showerror("错误", f"偏移结果超出屏幕范围({screen_width}x{screen_height})，请重新设置偏移量。")
+                        return
+                    if new_info:
+                        # 更新鼠标信息
+                        updated_image = list(image)
+                        updated_image[4] = new_info
+                        
+                        # 如果勾选了同时偏移识图区域，并且存在识图区域信息
+                        if offset_region and len(image) > 14 and image[14]:
+                            original_region = image[14]
+                            new_region = process_region_offset(original_region, entry_offset_x, entry_offset_y)
+                            updated_image[14] = new_region
+                            
+                            # 记录识图区域的变化
+                            if new_region != original_region:
+                                step_name = image[1]
+                                logging.info(f"【{step_name}】识图区域更新：{original_region} → {new_region}")
+                                print(f"【{step_name}】识图区域更新：{original_region} → {new_region}")
+                        
+                        # 更新image_list
+                        self.image_list[i] = tuple(updated_image)
 
-                    parts = new_info.split(":")
-                    current_coords = parts[1]
-                    current_offset_info = parts[4]
-                    # 字符串转为整数坐标
-                    x1, y1 = map(int, current_coords.split(','))
-                    dx, dy = map(int, current_offset_info.split(','))
+                        orig_x, orig_y = map(int, image[4].split(":")[1].split(","))
+                        off_set_x, off_set_y = map(int, image[4].split(":")[4].split(","))
+                        click_x = orig_x + off_set_x
+                        click_y = orig_y + off_set_y
 
-                    # 计算偏移后的坐标
-                    new_x = x1 + dx
-                    new_y = y1 + dy
-                    new_click_coord = f"{new_x},{new_y}"
-                    click_coord = f"{click_x},{click_y}"
+                        parts = new_info.split(":")
+                        current_coords = parts[1]
+                        current_offset_info = parts[4]
+                        # 字符串转为整数坐标
+                        x1, y1 = map(int, current_coords.split(','))
+                        dx, dy = map(int, current_offset_info.split(','))
 
-                    old_coodr = click_coord
-                    new_coodr = new_click_coord
-                    step_name = image[1]
-                    logging.info(f"【{step_name}】点击位置更新：({old_coodr}) → ({new_coodr})")      
-                    print(f"【{step_name}】点击位置更新：({old_coodr}) → ({new_coodr})")
+                        # 计算偏移后的坐标
+                        new_x = x1 + dx
+                        new_y = y1 + dy
+                        new_click_coord = f"{new_x},{new_y}"
+                        click_coord = f"{click_x},{click_y}"
 
-            dialog.destroy()
-            self.refresh_listbox_by_current_filter()
+                        old_coodr = click_coord
+                        new_coodr = new_click_coord
+                        step_name = image[1]
+                        logging.info(f"【{step_name}】点击位置更新：({old_coodr}) → ({new_coodr})")      
+                        print(f"【{step_name}】点击位置更新：({old_coodr}) → ({new_coodr})")
 
-        # 按钮框架
-        btn_frame = tk.Frame(dialog)
-        btn_frame.pack(pady=10, fill="x")
+                dialog.destroy()
+                self.refresh_listbox_by_current_filter()
 
-        btn_frame.columnconfigure(0, weight=1)
+            # 按钮框架
+            btn_frame = tk.Frame(dialog)
+            btn_frame.pack(pady=10, fill="x")
 
-        auto_calculate = ttk.Button(
-            btn_frame,
-            text="自动计算偏移量",
-            command=auto_offset,
-            bootstyle="primary-outline"
-        )
-        auto_calculate.grid(row=0, column=0, padx=20, pady=(0, 20), sticky="ew")
+            btn_frame.columnconfigure(0, weight=1)
 
-        # 为"自动计算偏移量"添加tooltip
-        auto_calculate_tooltip = ToolTip(
-            auto_calculate,  # 这里改为绑定到Checkbutton部件
-            "拖动圆形确定点击位置后将自动计算偏移量",
-            self.root
-        )
+            auto_calculate = ttk.Button(
+                btn_frame,
+                text="自动计算偏移量",
+                command=auto_offset,
+                bootstyle="primary-outline"
+            )
+            auto_calculate.grid(row=0, column=0, padx=20, pady=(0, 10), sticky="ew")
 
-        # 显示tooltip的函数
-        def _on_loop_enter(e):
-            auto_calculate_tooltip.showtip()
+            # 新增：同时偏移识图区域选项
+            offset_region_var = tk.BooleanVar(value=False)
+            offset_region_checkbox = ttk.Checkbutton(
+                btn_frame,
+                text="同时偏移识图区域",
+                variable=offset_region_var,
+                bootstyle="secondary"
+            )
+            offset_region_checkbox.grid(row=1, column=0, padx=20, pady=(0, 20), sticky="w")
 
-        def _on_loop_leave(e):
-            auto_calculate_tooltip.hidetip()
+            # 为"自动计算偏移量"添加tooltip
+            auto_calculate_tooltip = ToolTip(
+                auto_calculate,  # 这里改为绑定到Checkbutton部件
+                "拖动圆形确定点击位置后将自动计算偏移量",
+                self.root
+            )
 
-        # 绑定事件到Checkbutton部件
-        auto_calculate.bind("<Enter>", _on_loop_enter)
-        auto_calculate.bind("<Leave>", _on_loop_leave)
+            # 显示tooltip的函数
+            def _on_loop_enter(e):
+                auto_calculate_tooltip.showtip()
 
-        # ✅ 添加分隔线（水平线）
-        separator = ttk.Separator(btn_frame, orient="horizontal")
-        separator.grid(row=1, column=0, sticky="ew", padx=5, pady=(0, 15))
+            def _on_loop_leave(e):
+                auto_calculate_tooltip.hidetip()
 
-        # 应用于更多步骤按钮
-        apply_btn = ttk.Button(
-            btn_frame,
-            text="应用于更多步骤",
-            command=select_steps,
-            bootstyle="primary-outline"
-        )
-        apply_btn.grid(row=2, column=0, padx=20, pady=5, sticky="ew")
+            # 绑定事件到Checkbutton部件
+            auto_calculate.bind("<Enter>", _on_loop_enter)
+            auto_calculate.bind("<Leave>", _on_loop_leave)
 
-        sub_frame = tk.Frame(btn_frame)
-        sub_frame.grid(row=3, column=0, padx=15, pady=(5,10), sticky="ew")
+            # ✅ 添加分隔线（水平线）
+            separator = ttk.Separator(btn_frame, orient="horizontal")
+            separator.grid(row=2, column=0, sticky="ew", padx=5, pady=(0, 15))
 
-        cancel_btn = ttk.Button(
-            sub_frame,
-            text="取消",
-            command=dialog.destroy,
-            bootstyle="primary-outline"
-        )
-        cancel_btn.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
+            # 应用于更多步骤按钮
+            apply_btn = ttk.Button(
+                btn_frame,
+                text="应用于更多步骤",
+                command=select_steps,
+                bootstyle="primary-outline"
+            )
+            apply_btn.grid(row=3, column=0, padx=20, pady=5, sticky="ew")
 
-        save_btn = ttk.Button(
-            sub_frame,
-            text="保存",
-            command=on_save,
-            bootstyle="primary-outline"
-        )
-        save_btn.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
+            sub_frame = tk.Frame(btn_frame)
+            sub_frame.grid(row=4, column=0, padx=15, pady=(5,10), sticky="ew")
 
-        initial = set(self.get_selected_original_indices()) 
-        if len(initial) > 1:
-            auto_calculate["state"] = "disabled"  
-        else:
-            auto_calculate["state"] = "normal"    
+            cancel_btn = ttk.Button(
+                sub_frame,
+                text="取消",
+                command=dialog.destroy,
+                bootstyle="primary-outline"
+            )
+            cancel_btn.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
 
-        # 让 Tkinter 计算理想大小
-        dialog.update_idletasks()
-        w = dialog.winfo_reqwidth()
-        h = dialog.winfo_reqheight()
+            save_btn = ttk.Button(
+                sub_frame,
+                text="保存",
+                command=on_save,
+                bootstyle="primary-outline"
+            )
+            save_btn.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
 
-        # 计算居中位置
-        main_x = self.root.winfo_x()
-        main_y = self.root.winfo_y()
-        main_w = self.root.winfo_width()
-        main_h = self.root.winfo_height()
-        x = main_x + (main_w - w) // 2
-        y = main_y + (main_h - h) // 2
+            initial = set(self.get_selected_original_indices()) 
+            if len(initial) > 1:
+                auto_calculate["state"] = "disabled"  
+            else:
+                auto_calculate["state"] = "normal"    
 
-        # 一次性设置大小和位置，并显示
-        dialog.geometry(f"{w}x{h}+{x}+{y}")
-        dialog.deiconify()
+            # 让 Tkinter 计算理想大小
+            dialog.update_idletasks()
+            w = dialog.winfo_reqwidth()
+            h = dialog.winfo_reqheight()
 
-        dialog.iconbitmap("icon/app.ico")
+            # 计算居中位置
+            main_x = self.root.winfo_x()
+            main_y = self.root.winfo_y()
+            main_w = self.root.winfo_width()
+            main_h = self.root.winfo_height()
+            x = main_x + (main_w - w) // 2
+            y = main_y + (main_h - h) // 2
+
+            # 一次性设置大小和位置，并显示
+            dialog.geometry(f"{w}x{h}+{x}+{y}")
+            dialog.deiconify()
+
+            dialog.iconbitmap("icon/app.ico")
 
     def save_config(self):
         # 构造配置字典，过滤掉不存在的图片
