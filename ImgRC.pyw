@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 from pathlib import Path
+import random
 import re
 import subprocess
 import tempfile
@@ -37,7 +38,7 @@ from pynput import mouse
 from pynput.mouse import Button, Controller
 
 #查找tree每个索引的注释请查找：tree索引注释
-CURRENT_VERSION = "v1.2.9" #版本号
+CURRENT_VERSION = "v1.3.1" #版本号
 
 def run_as_admin():
     if ctypes.windll.shell32.IsUserAnAdmin():
@@ -119,7 +120,7 @@ class ImageRecognitionApp:
         self.root = root
         self.root.title("ImgRC")
         self.style = tb.Style(theme='flatly')  # 选择一个主题
-        self.image_list = []  # 存储 (图像路径, 步骤名称, 识图阈值, 键盘动作, 点击位置, 延时ms, 条件, 需跳转，状态， 需禁用， 鼠标动作， 识图区域)
+        self.image_list = []  # 存储 (图像路径, 步骤名称, 识图阈值, 键盘动作, 点击位置, 步骤延时, 条件, 需跳转，状态， 需禁用， 鼠标动作， 识图区域)
         self.filtered_index_map = []
         self.filtered_config_indices = []
         self.current_filter_text = ""
@@ -136,7 +137,7 @@ class ImageRecognitionApp:
         self.change_coodr_hotkey = "Ctrl+F2"    # 更改点击点击位置热键
         self.retake_image_hotkey = "F4"    # 重新截图热键
         self.similarity_threshold = 0.8  # 默认识图阈值阈值
-        self.delay_time = 0.1  # 默认延迟时间
+        self.delay_time = 0.1  # 默认延时时间
         self.loop_count = 1  # 默认循环次数
         self.retry_count = 0 #重新匹配初始计数
         self.screenshot_folder = 'screenshots'  # 截图保存文件夹
@@ -175,7 +176,7 @@ class ImageRecognitionApp:
         self._scroll_position = (0, 0)  # 记录滚动位置 (x, y)
         self.SCROLL_MERGE_WINDOW = 1  # 合并指定时间内（单位：秒）内的滚动步骤
         self.last_step_time = None  # 上一个步骤的时间戳
-        self.insert_delay_next = False  # 是否需要插入延迟
+        self.insert_delay_next = False  # 是否需要插入延时
         self.current_delay_num = 1
 
         self.checking_update = False
@@ -645,9 +646,9 @@ class ImageRecognitionApp:
         self.region_b = tb.Frame(self.region_l)
         self.region_b.pack(fill=tk.BOTH, expand=True, padx=2, pady=5)
 
-        # 使用 Treeview 来显示图片和延时ms
+        # 使用 Treeview 来显示图片和步骤延时
         self.tree = ttk.Treeview(self.region_b, columns=(
-            "图片名称", "步骤名称", "识图阈值", "键盘动作", "点击位置", "延时ms", "条件", 
+            "图片名称", "步骤名称", "识图阈值", "键盘动作", "点击位置", "步骤延时", "条件", 
             "需跳转", "状态", "需禁用", "鼠标动作", "条件2", "需跳转2", "需禁用2", "识图区域"
         ), show='headings')#新增索引
         self.tree.heading("图片名称", text="图片名称")
@@ -655,7 +656,7 @@ class ImageRecognitionApp:
         self.tree.heading("识图阈值", text="识图阈值")
         self.tree.heading("键盘动作", text="键盘动作")
         self.tree.heading("点击位置", text="点击位置")
-        self.tree.heading("延时ms", text="延时ms")
+        self.tree.heading("步骤延时", text="步骤延时")
         self.tree.heading("条件", text="条件")
         self.tree.heading("需跳转", text="需跳转")
         self.tree.heading("状态", text="状态")
@@ -673,7 +674,7 @@ class ImageRecognitionApp:
         self.tree.column("识图阈值", width=75, anchor='center')
         self.tree.column("键盘动作", width=75, anchor='center')
         self.tree.column("点击位置", width=75, anchor='center')
-        self.tree.column("延时ms", width=75, anchor='center')
+        self.tree.column("步骤延时", width=75, anchor='center')
         self.tree.column("条件", width=20, anchor='center')
         self.tree.column("需跳转", width=75, anchor='center')
         self.tree.column("状态", width=75, anchor='center')
@@ -723,7 +724,7 @@ class ImageRecognitionApp:
         self.tree.bind('<Leave>', on_leave2)
 
         #显示的列
-        self.tree.configure(displaycolumns=["步骤名称", "延时ms"])
+        self.tree.configure(displaycolumns=["步骤名称", "步骤延时"])
         #禁用状态的颜色
         self.tree.tag_configure("disabled", foreground="#ced4da")
 
@@ -1996,7 +1997,7 @@ class ImageRecognitionApp:
         self.top.protocol("WM_DELETE_WINDOW", self.cleanup_screenshot_window)
 
         # 在窗口呈现后，等待一次自动点击
-        self.top.after(100, self._auto_click_current_position)  # 设置延迟 100 毫秒
+        self.top.after(100, self._auto_click_current_position)  # 设置延时 100 毫秒
 
     def _auto_click_current_position(self):
         if not self.is_dragging:
@@ -2112,7 +2113,7 @@ class ImageRecognitionApp:
         # 计算截图区域的中心点击位置
         center_x = (min(self.start_x, end_x) + max(self.start_x, end_x)) // 2
         center_y = (min(self.start_y, end_y) + max(self.start_y, end_y)) // 2
-        mouse_click_coordinates = f"click:{center_x},{center_y}:0:1:0,0"
+        mouse_click_coordinates = f"click:{center_x},{center_y}:0:1:0,0:0:0"
 
         # 更新图像列表
         if self.need_retake_screenshot:
@@ -2159,13 +2160,13 @@ class ImageRecognitionApp:
                     count = parts[3] if len(parts) > 3 else "1"
                     # offset_info = "0,0" #重新截图后清除偏移量
                     offset_info = parts[4] #重新截图后保留偏移量
+                    click_delay = parts[5]
+                    dynamic_delay = parts[6]
                     # 重新构建鼠标动作字符串
-                    mouse_action = f"{action}:{center_x},{center_y}:{dynamic}"
-                    mouse_action += f":{count}"
-                    mouse_action += f":{offset_info}"
+                    mouse_action = f"{action}:{center_x},{center_y}:{dynamic}:{count}:{offset_info}:{click_delay}:{dynamic_delay}"
                 else:
                     # 如果没有鼠标动作数据，使用默认的单击动作
-                    mouse_action = f"click:{center_x},{center_y}:0:1:0,0"
+                    mouse_action = f"click:{center_x},{center_y}:0:1:0,0:0:0"
 
                 #处理识图区域
                 original_area_str = selected_image[14] 
@@ -2346,7 +2347,7 @@ class ImageRecognitionApp:
         self.recorded_actions = []
         self.current_step_num = self._get_next_step_number()  # 现在这个方法存在
         self.last_step_time = None 
-        self.insert_delay_next = False  # 是否需要插入延迟
+        self.insert_delay_next = False  # 是否需要插入延时
         self.current_delay_num = 1
               
         # 只设置鼠标钩子
@@ -2578,7 +2579,7 @@ class ImageRecognitionApp:
                 delay_step_name = f"等待{self.current_delay_num}"
                 self.current_delay_num += 1
 
-                delay_mouse_action = f"none:{coords}:0:1:0,0"
+                delay_mouse_action = f"none:{coords}:0:1:0,0:0:0"
                 delay_result = ""
                 delay_img_path = self._copy_default_img_with_index()
 
@@ -2620,7 +2621,7 @@ class ImageRecognitionApp:
                     self.tree.focus(item_id)
                     self.tree.see(item_id)
                 except Exception as e:
-                    print(f"插入延迟步骤出错: {e}")
+                    print(f"插入延时步骤出错: {e}")
 
         # === 插入主步骤 ===
         default_img_path = self._copy_default_img_with_index()
@@ -2640,7 +2641,7 @@ class ImageRecognitionApp:
         if action_key in ["rc_scrollUp", "rc_scrollDown"]:
             count_val = str(action.get('count', 1))
 
-        mouse_action = f"{action_key}:{coords}:{dynamic}:{count_val}:0,0"
+        mouse_action = f"{action_key}:{coords}:{dynamic}:{count_val}:0,0:0:0"
 
         action_mapping = {
             "click": "左键单击",
@@ -2733,7 +2734,7 @@ class ImageRecognitionApp:
             # 清空原有映射表
             self.filtered_index_map = []
 
-            # 插入新项，显示图片名称和延时ms
+            # 插入新项，显示图片名称和步骤延时
             for index, item in enumerate(self.image_list):
                 try:
                     if not item or len(item) < 1:  # 检查项目是否有效
@@ -2781,13 +2782,15 @@ class ImageRecognitionApp:
                         photo = ImageTk.PhotoImage(image)
 
                         # 插入所有数据（包括“状态”列）
+                        display_wait_time = f"{wait_time} ms" if wait_time != "" else ""  # 显示时加上毫秒
+
                         tree_item = self.tree.insert("", tk.END, values=(
                             os.path.basename(img_path), 
                             step_name, 
                             similarity_threshold, 
                             keyboard_input, 
                             mouse_click_coordinates, 
-                            wait_time,
+                            display_wait_time,  #只修改显示，不改原值
                             condition,
                             jump_to,
                             status, 
@@ -2797,8 +2800,8 @@ class ImageRecognitionApp:
                             jump_to_2,
                             steps_to_disable_2,
                             recognition_area,
-                            #新增索引
                         ), image=photo)
+
                         self.tree.image_refs.append(photo)  # 保持对图像的引用
                         # 插入 tree 项后记录原始索引
                         self.filtered_index_map.append(index)
@@ -3430,56 +3433,80 @@ class ImageRecognitionApp:
                     if ":" in mouse_coordinates:
                         parts = mouse_coordinates.split(":")
                         action = parts[0]
-                        
-                        # 如果是无操作，直接跳过不执行任何鼠标动作
+
                         if action == "none":
-                            pass  # 不执行任何操作
+                            pass
                         else:
-                            orig_x, orig_y = map(int, mouse_coordinates.split(":")[1].split(","))
-                            off_set_x, off_set_y = map(int, mouse_coordinates.split(":")[4].split(","))
+                            orig_x, orig_y = map(int, parts[1].split(","))
+                            off_set_x, off_set_y = map(int, parts[4].split(","))
                             click_x = orig_x + off_set_x
                             click_y = orig_y + off_set_y
                             click_coords = f"{click_x},{click_y}"
-                            is_dynamic = parts[2]
-                            # 对于需要计数的操作（点击、滚轮），解析最后的数字，默认 1
-                            count_val = int(parts[3]) if len(parts) > 3 else 1  
 
-                            # 计算动态点击的位置
+                            is_dynamic = parts[2]
+                            count_val = int(parts[3]) if len(parts) > 3 else 1
+
+                            # 延时参数解析（兼容旧格式）
+                            click_delay = int(parts[5]) if len(parts) > 5 else 0
+                            dynamic_delay = parts[6] if len(parts) > 6 else "0"
+
+                            # 计算点击坐标
                             if is_dynamic == "1":
                                 x = max_loc[0] + template.shape[1] // 2 + x1 + off_set_x
                                 y = max_loc[1] + template.shape[0] // 2 + y1 + off_set_y
                             else:
                                 x, y = map(int, click_coords.split(","))
 
-                            # 执行相应的鼠标操作
+                            # 计算延时时间（只对 click/rightClick/doubleClick 生效）
+                            def get_delay():
+                                if dynamic_delay == "1":
+                                    return random.randint(click_delay + 100, click_delay + 5000)
+                                else:
+                                    return click_delay
+
+                            # 执行动作
                             if action == "click":
                                 for _ in range(count_val):
-                                    
-                                    self.win32_click(x, y) #Windows底层点击方法，兼具速度和稳定
+                                    delay = get_delay()
+                                    if delay > 0:
+                                        time.sleep(delay / 1000.0)
+                                        print(f"【{step_name}】点击延时：{delay}毫秒")
+                                        logging.info(f"【{step_name}】点击延时：{delay}毫秒")
+                                    self.win32_click(x, y)
 
                             elif action == "rightClick":
+                                delay = get_delay()
+                                if delay > 0:
+                                    time.sleep(delay / 1000.0)
+                                    print(f"【{step_name}】点击延时：{delay}毫秒")
+                                    logging.info(f"【{step_name}】点击延时：{delay}毫秒")
                                 pyautogui.rightClick(x, y)
 
                             elif action == "doubleClick":
+                                delay = get_delay()
+                                if delay > 0:
+                                    time.sleep(delay / 1000.0)
+                                    print(f"【{step_name}】点击延时：{delay}毫秒")
+                                    logging.info(f"【{step_name}】点击延时：{delay}毫秒")
                                 self.win32_double_click(x, y)
 
                             elif action == "mouseDown":
                                 pyautogui.moveTo(x, y)
                                 pyautogui.mouseDown()
+
                             elif action == "mouseUp":
-                                pyautogui.moveTo(x, y, duration=0.1) 
-                                pyautogui.mouseUp()                
+                                pyautogui.moveTo(x, y, duration=0.1)
+                                pyautogui.mouseUp()
 
                             elif action == "scrollUp":
                                 notch = 70
-                                # 移动到点击位置后，再执行滚轮操作
                                 pyautogui.moveTo(x, y)
                                 time.sleep(0.1)
                                 for _ in range(count_val):
                                     pyautogui.scroll(notch, x=x, y=y)
+
                             elif action == "scrollDown":
                                 notch = 70
-                                # 移动到点击位置后，再执行滚轮操作
                                 pyautogui.moveTo(x, y)
                                 time.sleep(0.1)
                                 for _ in range(count_val):
@@ -3487,14 +3514,13 @@ class ImageRecognitionApp:
 
                             elif action == "rc_scrollUp":
                                 notch = 120
-                                # 移动到点击位置后，再执行滚轮操作
                                 pyautogui.moveTo(x, y)
                                 time.sleep(0.1)
                                 for _ in range(count_val):
                                     pyautogui.scroll(notch, x=x, y=y)
+
                             elif action == "rc_scrollDown":
                                 notch = 120
-                                # 移动到点击位置后，再执行滚轮操作
                                 pyautogui.moveTo(x, y)
                                 time.sleep(0.1)
                                 for _ in range(count_val):
@@ -3840,6 +3866,8 @@ class ImageRecognitionApp:
         current_coords = ""
         current_dynamic = "0"
         current_count = "1"
+        current_click_delay = "0"
+        current_dynamic_delay = "0"
 
         if selected_image[4]:
             try:
@@ -3857,8 +3885,13 @@ class ImageRecognitionApp:
                 current_count = parts[3] if current_action in ["click", "scrollUp", "scrollDown"] and len(parts) > 3 else "1"
                 current_offset_info = parts[4] if len(parts) > 4 else "0,0"
 
+                # ✅ 兼容旧数据：没有延时就补上
+                current_click_delay = parts[5] if len(parts) > 5 else "0"
+                current_dynamic_delay = parts[6] if len(parts) > 6 and parts[6] == "1" else "0"
+
             except:
-                pass
+                current_click_delay = "0"
+                current_dynamic_delay = "0"
 
         # 字符串转为整数坐标
         x1, y1 = map(int, current_coords.split(','))
@@ -3960,7 +3993,6 @@ class ImageRecognitionApp:
         tk.Label(frame_scroll_down, text="行").pack(side=tk.LEFT)
 
         # 添加无操作选项
-        # 创建单选按钮并保留引用
         none_radio = tk.Radiobutton(action_frame, value="none", text="无操作", variable=action_var)
         none_radio.pack(anchor=tk.W)
 
@@ -3971,14 +4003,10 @@ class ImageRecognitionApp:
             self.root
         )
 
-        # 显示tooltip的函数
         def _on_none_enter(e):
             none_radio_tooltip.showtip()
-
         def _on_none_leave(e):
             none_radio_tooltip.hidetip()
-
-        # 绑定事件
         none_radio.bind("<Enter>", _on_none_enter)
         none_radio.bind("<Leave>", _on_none_leave)
 
@@ -3989,21 +4017,48 @@ class ImageRecognitionApp:
 
         # 为动态点击添加tooltip
         dynamic_var_tooltip = ToolTip(
-            dynamic_checkbutton,  # 这里改为绑定到Checkbutton部件
+            dynamic_checkbutton,
             "• 开启后将自动追踪步骤图片所在位置进行点击\n• 默认点击位置为步骤图片中心点\n• 设置点击偏移可基于偏移量，偏离步骤图片中心点进行动态点击",
             self.root
         )
-
-        # 显示tooltip的函数
         def _on_loop_enter(e):
             dynamic_var_tooltip.showtip()
-
         def _on_loop_leave(e):
             dynamic_var_tooltip.hidetip()
-
-        # 绑定事件到Checkbutton部件
         dynamic_checkbutton.bind("<Enter>", _on_loop_enter)
         dynamic_checkbutton.bind("<Leave>", _on_loop_leave)
+
+        # 动态延时勾选框
+        dynamic_delay_var = tk.BooleanVar(value=(current_dynamic_delay == "1"))
+        dynamic_delay_check = tk.Checkbutton(
+            action_frame,
+            text="动态延时",
+            variable=dynamic_delay_var
+        )
+        dynamic_delay_check.pack(anchor=tk.W)
+
+        # 动态延时 tooltip
+        dynamic_delay_tooltip = ToolTip(
+            dynamic_delay_check,
+            "勾选后基于点击延时随机浮动延时时间",
+            self.root
+        )
+        def _on_dd_enter(e):
+            dynamic_delay_tooltip.showtip()
+        def _on_dd_leave(e):
+            dynamic_delay_tooltip.hidetip()
+        dynamic_delay_check.bind("<Enter>", _on_dd_enter)
+        dynamic_delay_check.bind("<Leave>", _on_dd_leave)
+
+        # 点击延时输入框
+        delay_frame = tk.Frame(action_frame)
+        delay_frame.pack(anchor=tk.W, pady=2)
+
+        tk.Label(delay_frame, text="点击延时:").pack(side=tk.LEFT)
+        click_delay_var = tk.StringVar(value=current_click_delay)
+        click_delay_entry = tk.Entry(delay_frame, textvariable=click_delay_var, width=6)
+        click_delay_entry.pack(side=tk.LEFT, padx=5)
+        tk.Label(delay_frame, text="毫秒").pack(side=tk.LEFT)
 
         def clear_offset():  
             global click_coord
@@ -4012,20 +4067,14 @@ class ImageRecognitionApp:
             if click_coord == current_coords:
                 messagebox.showerror("重置坐标","点击位置已位于图片中心位置，无需重置！")
                 return
-            
             else:
-                # 添加二次确认对话框
                 confirm = messagebox.askyesno("确认重置", "确定要将点击位置重置到图片中心点吗？")
-
-                if confirm:  # 如果用户点击"是"
+                if confirm:
                     click_coord = current_coords
                     coords = current_coords
                     current_offset_info = "0,0"
-                    # 先清空输入框
                     coord_entry.delete(0, tk.END)  
-                    # 再插入新坐标
                     coord_entry.insert(0, coords)
-
                     messagebox.showinfo("重置成功", "点击位置已更新到步骤图片中心点")
                 else:
                     return
@@ -4037,10 +4086,8 @@ class ImageRecognitionApp:
                 # 获取点击位置
                 coords = coord_entry.get().strip()
                 if coords != click_coord:
-                    # 字符串转为整数坐标
                     x2, y2 = map(int, coords.split(','))
                     dx2, dy2 = map(int, click_coord.split(','))
-
                     new_x2 = x2 - dx2 + dx
                     new_y2 = y2 - dy2 + dy
                     new_offset_info = f"{new_x2},{new_y2}"
@@ -4048,31 +4095,38 @@ class ImageRecognitionApp:
                 else:
                     offset_info = current_offset_info
                     
-                if not coords or "," not in coords:  # 无操作也需要点击位置验证
+                if not coords or "," not in coords:
                     messagebox.showerror("错误", "请输入有效的点击位置 (x,y)", parent=dialog)
                     return
-                    
                 try:
-                    x, y = map(int, coords.split(","))  # 验证点击位置是否为整数
+                    x, y = map(int, coords.split(","))
                 except ValueError:
                     messagebox.showerror("错误", "点击位置必须是整数", parent=dialog)
                     return
 
-                #获取鼠标动作
+                # 获取鼠标动作
                 action = action_var.get()
                 dynamic = "1" if dynamic_var.get() else "0"
                 
+                # 获取延时数值
+                try:
+                    click_delay = int(click_delay_entry.get().strip())
+                    if click_delay < 0:
+                        raise ValueError
+                except ValueError:
+                    messagebox.showerror("错误", "点击延时必须是非负整数", parent=dialog)
+                    return
+
+                dynamic_delay = "1" if dynamic_delay_var.get() else "0"
+
                 if action == "none":
-                    mouse_action = f"{action}:{current_coords}:0:1:{offset_info}"
+                    mouse_action = f"{action}:{current_coords}:0:1:{offset_info}:{click_delay}:{dynamic_delay}"
                     mouse_action_result = ""  # 显示为空
                 else:
-                    
-                    # 检查是否尝试在关闭识图的情况下启用动态点击
                     if dynamic == "1" and selected_image[2] == 0.0:
                         messagebox.showinfo("提示", "当前步骤已关闭识图，请开启识图后再启用动态点击！", parent=dialog)
                         return
 
-                    # 获取次数/行数
                     if action == "click":
                         count_str = left_click_entry.get().strip() if left_click_entry else "1"
                     elif action in ["scrollUp", "scrollDown"]:
@@ -4089,7 +4143,7 @@ class ImageRecognitionApp:
                         return
 
                     # 生成标准格式
-                    mouse_action = f"{action}:{current_coords}:{dynamic}:{count_val}:{offset_info}"
+                    mouse_action = f"{action}:{current_coords}:{dynamic}:{count_val}:{offset_info}:{click_delay}:{dynamic_delay}"
 
                     # 生成可读描述
                     action_mapping = {
@@ -4104,11 +4158,17 @@ class ImageRecognitionApp:
                     action_desc = action_mapping.get(action, action)
                     dynamic_desc = " 启用动态点击" if dynamic == "1" else ""
                     unit = "行" if action in ["scrollUp", "scrollDown"] else "次"
-                    
-                    mouse_action_result = f"{action_desc} {count_val}{unit}{dynamic_desc}" if action in ["click", "scrollUp", "scrollDown"] \
-                                        else f"{action_desc}{dynamic_desc}"
 
-                #当开启动态点击，且识图区域为步骤图片时，自动切换全屏识图
+                    delay_desc = f" 延时{click_delay}毫秒" if click_delay > 0 else ""
+                    dynamic_delay_desc = " 启用动态延时" if dynamic_delay == "1" else ""
+
+                    mouse_action_result = (
+                        f"{action_desc} {count_val}{unit}{dynamic_desc}{delay_desc}{dynamic_delay_desc}"
+                        if action in ["click", "scrollUp", "scrollDown"]
+                        else f"{action_desc}{dynamic_desc}{delay_desc}{dynamic_delay_desc}"
+                    )
+
+                # 当开启动态点击，且识图区域为步骤图片时，自动切换全屏识图
                 original_area_str = selected_image[14]
                 click_coords, area_choice_value, img_coords = original_area_str.split("|")
                 new_area_str = original_area_str
@@ -4117,27 +4177,24 @@ class ImageRecognitionApp:
                 elif dynamic == "0" and area_choice_value == 'fullscreen':
                     new_area_str = f"{click_coords}|screenshot|{img_coords}"
 
-                # 更新数据
                 tpl = tuple(selected_image)
                 new_image = (
-                    tpl[:4]                     # 保留 0~3
-                    + (mouse_action,)           # 替换第 4 项
-                    + tpl[5:10]                 # 保留 5~9
-                    + (mouse_action_result,)    # 替换第 10 项
-                    + tpl[11:14]                # 保留 11~13
-                    + (new_area_str,)           # 替换第 14 项（第15个元素）
-                    + tpl[15:]                  # 保留 15 之后的
+                    tpl[:4]
+                    + (mouse_action,)
+                    + tpl[5:10]
+                    + (mouse_action_result,)
+                    + tpl[11:14]
+                    + (new_area_str,)
+                    + tpl[15:]
                 )
                 self.image_list[selected_index] = new_image
-
                 self.refresh_listbox_by_current_filter()
-
                 dialog.destroy()
 
             except Exception as e:
                 messagebox.showerror("错误", f"保存时出错: {str(e)}", parent=dialog)
 
-        # 添加保存和取消按钮
+        # 按钮
         button_frame = tk.Frame(dialog)
         button_frame.pack(fill=tk.X, pady=10)
 
@@ -4150,24 +4207,19 @@ class ImageRecognitionApp:
         save_btn = ttk.Button(center_frame, text="保存", command=save_mouse_action, bootstyle="primary-outline")
         save_btn.pack(side=tk.LEFT, padx=5)
 
-        # 让 Tkinter 计算理想大小
         dialog.update_idletasks()
         w = dialog.winfo_reqwidth()
         h = dialog.winfo_reqheight()
-
-        # 计算居中位置
         main_x = self.root.winfo_x()
         main_y = self.root.winfo_y()
         main_w = self.root.winfo_width()
         main_h = self.root.winfo_height()
         x = main_x + (main_w - w) // 2
         y = main_y + (main_h - h) // 2
-
-        # 一次性设置大小和位置，并显示
         dialog.geometry(f"{w}x{h}+{x}+{y}")
         dialog.deiconify()
-
         dialog.iconbitmap("icon/app.ico")
+
 
     def offset_coords(self):
             
@@ -4338,9 +4390,9 @@ class ImageRecognitionApp:
                 diameter = screen_height // 30
                 radius = diameter // 2
 
-                # —— 3. 隐藏主窗口并延迟创建覆盖层 ——
+                # —— 3. 隐藏主窗口并延时创建覆盖层 ——
                 self.root.withdraw()  # 隐藏主窗口
-                # 延迟200ms确保主窗口完全隐藏后再创建覆盖层
+                # 延时200ms确保主窗口完全隐藏后再创建覆盖层
                 self.root.after(200, lambda: _create_overlay(
                     root=self.root,
                     orig_x=click_x,
@@ -4521,7 +4573,7 @@ class ImageRecognitionApp:
 
                     center["x"], center["y"] = new_x, new_y
 
-                    # 不刷新遮罩，避免延迟
+                    # 不刷新遮罩，避免延时
                     # create_mask()  <-- 去掉这行
 
                     # 更新输入框内容
@@ -5360,7 +5412,7 @@ class ImageRecognitionApp:
             self.loop_count = config.get('loop_count', 1)
             self.only_keyboard_var.set(config.get('only_keyboard', False))
 
-            # 延迟加载弹窗逻辑开始
+            # 延时加载弹窗逻辑开始
             start_time = time.time()
             dialog_shown = False
             total = len(self.image_list)
@@ -6189,7 +6241,7 @@ class ImageRecognitionApp:
         """重置程序到初始状态"""
         try:
             # 重置所有变量到初始值
-            self.image_list = []  # 存储 (图像路径, 步骤名称, 识图阈值, 键盘动作, 点击位置, 延时ms, 条件, 需跳转，状态， 需禁用， 鼠标动作， 识图区域)
+            self.image_list = []  # 存储 (图像路径, 步骤名称, 识图阈值, 键盘动作, 点击位置, 步骤延时, 条件, 需跳转，状态， 需禁用， 鼠标动作， 识图区域)
             self.screenshot_area = None  # 用于存储截图区域
             self.rect = None  # 用于存储 Canvas 上的矩形
             self.start_x = None
@@ -6203,7 +6255,7 @@ class ImageRecognitionApp:
             self.change_coodr_hotkey = "Ctrl+F2"    # 更改点击点击位置热键
             self.retake_image_hotkey = "F4"    # 重新截图热键
             self.similarity_threshold = 0.8  # 默认识图阈值阈值
-            self.delay_time = 0.1  # 默认延迟时间
+            self.delay_time = 0.1  # 默认延时时间
             self.loop_count = 1  # 默认循环次数
             self.retry_count = 0 #重新匹配初始计数
             self.screenshot_folder = 'screenshots'  # 截图保存文件夹
@@ -6242,7 +6294,7 @@ class ImageRecognitionApp:
             self._scroll_position = (0, 0)  # 记录滚动位置 (x, y)
             self.SCROLL_MERGE_WINDOW = 0.5  # 0.5 秒内合并
             self.last_step_time = None  # 上一个步骤的时间戳
-            self.insert_delay_next = False  # 是否需要插入延迟
+            self.insert_delay_next = False  # 是否需要插入延时
             self.current_delay_num = 1
 
             self.checking_update = False
@@ -6321,6 +6373,8 @@ class ImageRecognitionApp:
                     
                     dynamic = parts[2] if len(parts) > 2 else "0"
                     count = parts[3] if len(parts) > 3 else "1"
+                    click_delay = parts[5] if len(parts) > 5 else "0"
+                    dynamic_delay = parts[6] if len(parts) > 6 else "0"
                     
                     # 计算坐标差值
                     offset_x = x - old_x
@@ -6330,13 +6384,11 @@ class ImageRecognitionApp:
                     new_offset_y = y - org_y
                     
                     # 重新构建鼠标动作字符串
-                    mouse_action = f"{action}:{original_coords}:{dynamic}"
-                    mouse_action += f":{count}"
-                    # 添加坐标差值
-                    mouse_action += f":{new_offset_x},{new_offset_y}"
+                    mouse_action = f"{action}:{original_coords}:{dynamic}:{count}:{new_offset_x},{new_offset_y}:{click_delay}:{dynamic_delay}"
+
                 else:
                     # 如果没有鼠标动作数据，使用默认的单击动作
-                    mouse_action = f"click:{original_coords}:0:1:0,0"  # 初始差值为0,0
+                    mouse_action = f"click:{original_coords}:0:1:0,0:0:0"  # 初始差值为0,0
                     
                 tpl = tuple(selected_image)
                 # 修改索引 4：
@@ -6459,7 +6511,7 @@ class ImageRecognitionApp:
         more_menu.add_command(label="条件判断", command=self.set_condition_jump)
         more_menu.add_command(label="点击偏移", command=self.offset_coords)
         more_menu.add_command(label="识图阈值", command=self.edit_similarity_threshold)
-        more_menu.add_command(label="延时ms", command=self.edit_wait_time)
+        more_menu.add_command(label="步骤延时", command=self.edit_wait_time)
         more_menu.add_command(label="重命名", command=self.edit_step_name)
         # 把子菜单添加到主菜单
         self.context_menu.add_cascade(label="编辑", menu=more_menu)
@@ -7008,10 +7060,10 @@ class ImageRecognitionApp:
                             coords = parts[1]
                             count = parts[3] if len(parts) > 3 else "1"
                             offset_info = parts[4] if len(parts) > 4 else "0,0"
+                            click_delay = parts[5] if len(parts) > 5 else "0"
+                            dynamic_delay = parts[6] if len(parts) > 6 else "0"
                             # 使用映射后的 dynamic_value
-                            new_mouse_action = f"{action}:{coords}:{dynamic_value}"
-                            new_mouse_action += f":{count}"
-                            new_mouse_action += f":{offset_info}"
+                            new_mouse_action = f"{action}:{coords}:{dynamic_value}:{count}:{offset_info}:{click_delay}:{dynamic_delay}"
                             new_image[4] = new_mouse_action
 
                             # 生成描述文本
@@ -7445,10 +7497,13 @@ class ImageRecognitionApp:
         x, y, width, height = bbox
         values = self.tree.item(selected_item, 'values')
         current_value = values[5] if len(values) > 5 else ""
+        
+        # 自动删除 "ms" 后缀，只保留数字部分
+        display_value = current_value.replace("ms", "").strip() if current_value else ""
 
         entry = tk.Entry(self.tree)
         entry.place(x=x, y=y, width=width, height=height)
-        entry.insert(0, current_value)
+        entry.insert(0, display_value)  # 插入去除ms后的值
         entry.select_range(0, tk.END)
         entry.focus()
 
@@ -7471,10 +7526,10 @@ class ImageRecognitionApp:
                 *selected_image[6:]      # 保留索引 6 以后
             )
 
-            # 更新 Treeview
+            # 更新 Treeview，显示时添加 "ms" 后缀
             all_values = list(self.tree.item(selected_item, 'values'))
             if len(all_values) > 5:
-                all_values[5] = str(new_wait_time)
+                all_values[5] = f"{new_wait_time}ms"  # 显示时添加ms后缀
                 self.tree.item(selected_item, values=all_values)
 
             self.refresh_listbox_by_current_filter()
@@ -7482,6 +7537,7 @@ class ImageRecognitionApp:
             entry.destroy()
 
         entry.bind('<FocusOut>', on_save)
+        entry.bind('<Return>', on_save)  # 添加回车键保存功能
 
     def on_treeview_double_click(self, event):
         """根据双击的列决定调用哪个编辑函数"""
@@ -7519,10 +7575,10 @@ class ImageRecognitionApp:
                     count = parts[3] if len(parts) > 3 else "1"
                     dynamic = 0
                     offset_info = parts[4] if len(parts) > 4 else "0,0"
+                    click_delay = parts[5] if len(parts) > 5 else "0"
+                    dynamic_delay = parts[6] if len(parts) > 6 else "0"
                     
-                    new_mouse_action = f"{action}:{coords}:{dynamic}"
-                    new_mouse_action += f":{count}"
-                    new_mouse_action += f":{offset_info}"
+                    new_mouse_action = f"{action}:{coords}:{dynamic}:{count}:{offset_info}:{click_delay}:{dynamic_delay}"
 
                     # 生成可读描述
                     action_mapping = {
