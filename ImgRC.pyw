@@ -35,10 +35,9 @@ from packaging import version
 import tkinter.font as tkFont
 from ttkbootstrap.widgets import Entry
 from pynput import mouse
-from pynput.mouse import Button, Controller
 
 #查找tree每个索引的注释请查找：tree索引注释
-CURRENT_VERSION = "v1.3.1" #版本号
+CURRENT_VERSION = "v1.3.2" #版本号
 
 def run_as_admin():
     if ctypes.windll.shell32.IsUserAnAdmin():
@@ -514,37 +513,38 @@ class ImageRecognitionApp:
         self.loop_count_entry.bind("<Enter>", _on_loop_enter)
         self.loop_count_entry.bind("<Leave>", _on_loop_leave)
 
-        # 区域M：勾选框区域
+        # 区域M：按钮区域
         self.region_m = tb.Frame(self.region_l)
-        self.region_m.pack(fill=tk.X, padx=2, pady=0)
+        self.region_m.pack(fill=tk.X, padx=2, pady=0)  # 去掉间距
 
-        # 默认运行中隐藏
-        self.allow_minimize_var = tk.BooleanVar(value=True)
+        # 状态变量（单刀双掷）
+        self.allow_minimize_var = tk.BooleanVar(value=True)  # 默认运行时隐藏选中
         self.follow_current_step = tk.BooleanVar(value=False)
 
-        # 运行中隐藏勾选框
-        self.allow_minimize_checkbox = tb.Checkbutton(
-            self.region_m, 
-            text="运行时隐藏", 
-            variable=self.allow_minimize_var, 
-            bootstyle="toolbutton",
-            command=self.toggle_allow_minimize
-        )
-        self.allow_minimize_checkbox.pack(side=tk.LEFT, expand=True, fill=tk.X, pady=5)
+        # 按钮样式
+        btn_style = {
+            "relief": "flat",
+        }
 
-        # 窗口置顶
-        self.follow_step_checkbox = tb.Checkbutton(
-            self.region_m, 
-            text="窗口置顶", 
-            variable=self.follow_current_step, 
-            bootstyle="toolbutton",
-            command=self.toggle_topmost
+        # 运行时隐藏按钮
+        self.allow_minimize_btn = tk.Button(
+            self.region_m,
+            text="运行时隐藏",
+            command=self.toggle_allow_minimize,
+            **btn_style
         )
-        self.follow_step_checkbox.pack(side=tk.LEFT, expand=True, fill=tk.X, pady=5)
+        self.allow_minimize_btn.pack(side=tk.LEFT, expand=True, fill=tk.BOTH)
 
-        # 仅键盘操作勾选框
-        # self.only_keyboard_checkbox = tb.Checkbutton(self.region_m, text="仅键盘操作", variable=self.only_keyboard_var, bootstyle=TOOLBUTTON)
-        # self.only_keyboard_checkbox.pack(side=tk.LEFT, pady=5)
+        # 窗口置顶按钮
+        self.follow_step_btn = tk.Button(
+            self.region_m,
+            text="窗口置顶",
+            command=self.toggle_follow_current_step,
+            **btn_style
+        )
+        self.follow_step_btn.pack(side=tk.LEFT, expand=True, fill=tk.BOTH)
+        # 初始化样式
+        self.update_button_style()
 
         style = tb.Style()  
         style.configure("Border.TFrame", background="#ced4da")
@@ -994,24 +994,36 @@ class ImageRecognitionApp:
         except Exception as e:
             print("加载默认图片失败:", e)
 
+    # 运行时隐藏/窗口置顶 自定义样式
+    def update_button_style(self):
+        if self.allow_minimize_var.get():
+            self.allow_minimize_btn.config(bg="#2c3e50", fg="white")
+            self.follow_step_btn.config(bg="#E0E0E0", fg="#495057")
+            self.root.attributes('-topmost', False)
+        else:
+            self.follow_step_btn.config(bg="#2c3e50", fg="white")
+            self.allow_minimize_btn.config(bg="#E0E0E0", fg="#495057")
+            self.root.attributes('-topmost', True)
+
+    # 运行时隐藏/窗口置顶 切换逻辑
     def toggle_allow_minimize(self):
         if self.allow_minimize_var.get():
-            # 如果勾选“运行时隐藏”，取消勾选“窗口置顶”
-            self.follow_current_step.set(False)
-            self.root.attributes('-topmost', False)  # 取消窗口置顶
-        else:
-            # 如果“运行时隐藏”未勾选，检查“窗口置顶”的状态
-            if not self.follow_current_step.get():
-                self.root.attributes('-topmost', False)
-
-    def toggle_topmost(self):
-        if self.follow_current_step.get():
-            # 如果勾选“窗口置顶”，取消勾选“运行时隐藏”
             self.allow_minimize_var.set(False)
-            self.root.attributes('-topmost', True)  # 设置窗口置顶
+            self.follow_current_step.set(True)
         else:
-            # 如果“窗口置顶”未勾选，取消窗口置顶状态
-            self.root.attributes('-topmost', False)
+            self.allow_minimize_var.set(True)
+            self.follow_current_step.set(False)
+        self.update_button_style()
+
+    def toggle_follow_current_step(self):
+        if self.follow_current_step.get():
+            self.follow_current_step.set(False)
+            self.allow_minimize_var.set(True)
+        else:
+            self.follow_current_step.set(True)
+            self.allow_minimize_var.set(False)
+        self.update_button_style()
+
 
     def init_logging(self):  # 初始化日志
         handler = RotatingFileHandler(
@@ -2159,9 +2171,9 @@ class ImageRecognitionApp:
                     dynamic = parts[2] if len(parts) > 2 else "0"
                     count = parts[3] if len(parts) > 3 else "1"
                     # offset_info = "0,0" #重新截图后清除偏移量
-                    offset_info = parts[4] #重新截图后保留偏移量
-                    click_delay = parts[5]
-                    dynamic_delay = parts[6]
+                    offset_info = parts[4] if len(parts) > 3 else "0,0" 
+                    click_delay = parts[5] if len(parts) > 5 else "0"
+                    dynamic_delay = parts[6] if len(parts) > 6 else "0"
                     # 重新构建鼠标动作字符串
                     mouse_action = f"{action}:{center_x},{center_y}:{dynamic}:{count}:{offset_info}:{click_delay}:{dynamic_delay}"
                 else:
@@ -4018,7 +4030,7 @@ class ImageRecognitionApp:
         # 为动态点击添加tooltip
         dynamic_var_tooltip = ToolTip(
             dynamic_checkbutton,
-            "• 开启后将自动追踪步骤图片所在位置进行点击\n• 默认点击位置为步骤图片中心点\n• 设置点击偏移可基于偏移量，偏离步骤图片中心点进行动态点击",
+            "• 勾选后将自动追踪步骤图片所在位置进行点击\n• 默认点击位置为步骤图片中心点\n• 设置点击偏移可基于偏移量，偏离步骤图片中心点进行动态点击",
             self.root
         )
         def _on_loop_enter(e):
@@ -4220,8 +4232,8 @@ class ImageRecognitionApp:
         dialog.deiconify()
         dialog.iconbitmap("icon/app.ico")
 
-
-    def offset_coords(self):
+    # 偏移坐标逻辑
+    def offset_coords(self): 
             
             # 获取当前屏幕分辨率
             screen_width = self.root.winfo_screenwidth()
@@ -7634,9 +7646,10 @@ class ImageRecognitionApp:
            
             # 更新界面显示
             self.refresh_listbox_by_current_filter()
-    
+
+        # 识图区域逻辑  
     def image_rc_area(self):
-        need_disable = False
+        is_multiple_choice = False
         screen_w = self.root.winfo_screenwidth()
         screen_h = self.root.winfo_screenheight()
 
@@ -7660,21 +7673,24 @@ class ImageRecognitionApp:
                 selected_image = self.image_list[idx]
                 selected_items_indices.append((idx, selected_image))
 
+        # 初始化 coords，保证多选也有默认值
         if len(selected_items_indices) == 1:
             original_area_str = selected_items_indices[0][1][14]
-            # 解析字符串
             coords, area_choice_value, img_coords = original_area_str.split("|")
             area_choice = tk.StringVar(value=area_choice_value)
         else:
-            area_choice = tk.StringVar(value="1")  # 设置一个不存在的值，不匹配任何选项
-            need_disable = True
+            # 多选时默认全屏
+            coords = f"0,0,{screen_w},{screen_h}"
+            area_choice = tk.StringVar(value="1")  # 设置一个不存在的值
+            is_multiple_choice = True
 
         frame_opts = tk.Frame(dialog)
         frame_opts.pack(padx=10, pady=10, anchor='w')
 
         rb1 = tk.Radiobutton(frame_opts, text="步骤图片", variable=area_choice, value='screenshot')
         rb2 = tk.Radiobutton(frame_opts, text="全屏", variable=area_choice, value='fullscreen')
-        rb3 = tk.Radiobutton(frame_opts, text="自定义", variable=area_choice, value='manual', command=lambda: open_manual_overlay())
+        rb3 = tk.Radiobutton(frame_opts, text="自定义", variable=area_choice, value='manual',
+                            command=lambda: open_manual_overlay(coords))
 
         rb1.pack(side='left')
         rb2.pack(side='left', padx=(10, 0))
@@ -7684,7 +7700,7 @@ class ImageRecognitionApp:
             dialog, 
             text="框选识图区域", 
             width=10,
-            command=lambda: (area_choice.set('manual'), open_manual_overlay()),
+            command=lambda: (area_choice.set('manual'), open_manual_overlay(coords)),
             bootstyle="primary-outline"
         )
         btn_manual.pack(padx=10, pady=(0, 10), fill='x', expand=True)
@@ -7695,20 +7711,15 @@ class ImageRecognitionApp:
         def on_save():
             choice = area_choice.get()
             for idx, selected_image in selected_items_indices:
-                # 解析当前项区域字符串（防止格式不一致，也可以都用统一初始值）
                 old_coords, area_choice_value, img_coords = selected_image[14].split("|")
                 img_left, img_top, img_right, img_bottom = map(int, img_coords.split(","))
 
-                # 根据选择模式创建对应的区域字符串
                 if choice == 'fullscreen':
-                    # 全屏模式: 主区域全屏，步骤图片也全屏
                     new_area_str = f"0,0,{screen_w},{screen_h}|fullscreen|{img_left},{img_top},{img_right},{img_bottom}"
                 elif choice == 'manual':
-                    # 手动模式 - 直接从当前点击位置获取
-                    l, t, r, b = map(int, coords.split(','))  # 手动范围区域
+                    l, t, r, b = map(int, coords.split(','))
                     new_area_str = f"{l},{t},{r},{b}|manual|{img_left},{img_top},{img_right},{img_bottom}"
                 else:
-                    # 默认步骤图片模式
                     new_area_str = f"{img_left},{img_top},{img_right},{img_bottom}|screenshot|{img_left},{img_top},{img_right},{img_bottom}"
 
                 new_image = list(self.image_list[idx])
@@ -7721,7 +7732,6 @@ class ImageRecognitionApp:
             dialog.destroy()
             self.refresh_listbox_by_current_filter()
 
-
         def on_cancel():
             dialog.destroy()
 
@@ -7731,12 +7741,7 @@ class ImageRecognitionApp:
         btn_cancel.pack(side='left', expand=True, fill='x', padx=(0, 5))
         btn_save.pack(side='right', expand=True, fill='x', padx=(5, 0))
 
-        if need_disable:
-            rb3.config(state="disabled")  # 禁用 Radiobutton
-            btn_manual.config(state="disabled")  # 禁用 Button
-            need_disable = False
-
-        old_coords, area_choice_value, img_coords = selected_image[14].split("|")       
+        old_coords, area_choice_value, img_coords = selected_items_indices[-1][1][14].split("|")       
         if area_choice_value == 'update':
             messagebox.showinfo("提示", f"检测到旧版本的配置文件\n请先完整运行完一次所有步骤，才可设置识图区域")
             rb1.config(state="disabled")
@@ -7758,15 +7763,13 @@ class ImageRecognitionApp:
         dialog.deiconify()
         dialog.iconbitmap("icon/app.ico")
 
-        def open_manual_overlay():
+        def open_manual_overlay(coords_value):
             self.root.withdraw()
-            # 给足时间用来隐藏主窗口
-            self.root.after(200, _after_hide_window)
+            self.root.after(200, lambda: _after_hide_window(coords_value))
 
-        def _after_hide_window():
-            left, top, right, bottom = map(int, coords.split(","))
+        def _after_hide_window(coords_value):
+            left, top, right, bottom = map(int, coords_value.split(","))
             if left == 0 and top == 0 and right == screen_w and bottom == screen_h:
-                # 全屏模式使用默认居中区域
                 default_w = int(screen_w//5)
                 default_h = int(screen_h//5)
                 initial_area = [
@@ -7776,7 +7779,7 @@ class ImageRecognitionApp:
                     min((screen_h + default_h)//2, screen_h),
                 ]
             else:
-                initial_area = list(map(int, coords.split(",")))
+                initial_area = list(map(int, coords_value.split(",")))
 
             # 1️⃣ 整屏截图
             screenshot_img = ImageGrab.grab()
