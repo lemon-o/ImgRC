@@ -37,7 +37,7 @@ from ttkbootstrap.widgets import Entry
 from pynput import mouse
 
 #查找tree每个索引的注释请查找：tree索引注释
-CURRENT_VERSION = "v1.3.2" #版本号
+CURRENT_VERSION = "v1.3.3" #版本号
 
 def run_as_admin():
     if ctypes.windll.shell32.IsUserAnAdmin():
@@ -2103,7 +2103,7 @@ class ImageRecognitionApp:
 
         # 构造截图区域字符串,“screenshot”为选项默认值
         img_left, img_top, img_right, img_bottom = left, top, right, bottom
-        area_offset = 5
+        area_offset = 20
         img_left = max(0, img_left - area_offset)
         img_top = max(0, img_top - area_offset)
         img_right += area_offset
@@ -2756,13 +2756,11 @@ class ImageRecognitionApp:
                     if not os.path.exists(img_path):
                         print(f"警告：图像文件不存在 {img_path}")
                         logging.warning(f"图像文件不存在 {img_path}")
-                        continue
-                    full_item = list(item)
-                    # 确保数据完整，若字段不足则补空字符串
-                    while len(full_item) < 15: #新增索引
-                        full_item.append("")
+                        img_path = ""  # 如果路径不存在，强制置空
 
-                    # 解包所有列（包括新增的“状态”列和“需禁用”列）
+                    full_item = list(item)
+
+                    # 解包所有列
                     (
                         img_path, 
                         step_name, 
@@ -2779,7 +2777,6 @@ class ImageRecognitionApp:
                         jump_to_2,
                         steps_to_disable_2,
                         recognition_area,
-                        #新增索引
                     ) = full_item
 
                     # ✅ 添加搜索关键词过滤条件
@@ -3117,20 +3114,18 @@ class ImageRecognitionApp:
                     match_result = True if keyboard_input else False
 
                 if condition == "识图成功" and match_result:
-
+                    # 首次识图成功的跳转逻辑
                     if jump_to in self.step_index_map:
-                        index = self.step_index_map[jump_to] -1
+                        index = self.step_index_map[jump_to] - 1
                         print(f"从【{img_name}】跳转到【{jump_to}】")
                         logging.info(f"从【{img_name}】跳转到【{jump_to}】")
 
                     if disable_target in self.step_index_map:
                         target_index = self.step_index_map[disable_target]
                         target_image = list(self.image_list[target_index])
-                        # 仅在目标项未被禁用时更新
                         if target_image[8] != "禁用":
                             target_image[8] = "禁用"
                             self.image_list[target_index] = tuple(target_image)
-                            # 同步更新 TreeView 显示
                             target_item = self.tree.get_children()[target_index]
                             values = list(self.tree.item(target_item, 'values'))
                             values[8] = "禁用"
@@ -3140,27 +3135,44 @@ class ImageRecognitionApp:
                     # 重新匹配
                     if not match_result and not condition_2:
                         match_result = self.retry_until_match(img_path, similarity_threshold, wait_time)
+                    
+                    # ⭐ 重试后再次检查条件1：识图成功
+                    if condition == "识图成功" and match_result:
+                        if jump_to in self.step_index_map:
+                            index = self.step_index_map[jump_to] - 1
+                            print(f"从【{img_name}】跳转到【{jump_to}】")
+                            logging.info(f"从【{img_name}】跳转到【{jump_to}】")
 
-                if condition_2 == "识图失败" and not match_result:
+                        if disable_target in self.step_index_map:
+                            target_index = self.step_index_map[disable_target]
+                            target_image = list(self.image_list[target_index])
+                            if target_image[8] != "禁用":
+                                target_image[8] = "禁用"
+                                self.image_list[target_index] = tuple(target_image)
+                                target_item = self.tree.get_children()[target_index]
+                                values = list(self.tree.item(target_item, 'values'))
+                                values[8] = "禁用"
+                                self.tree.item(target_item, values=tuple(values))
+                                print(f"{disable_target} 已被禁用")
+                    
+                    # ⭐ 同时检查条件2：识图失败（无论是否重试）
+                    if condition_2 == "识图失败" and not match_result:
+                        if jump_to_2 in self.step_index_map:
+                            index = self.step_index_map[jump_to_2] - 1
+                            print(f"从【{img_name}】跳转到【{jump_to_2}】")
+                            logging.info(f"从【{img_name}】跳转到【{jump_to_2}】")
 
-                    if jump_to_2 in self.step_index_map:
-                        index = self.step_index_map[jump_to_2] -1
-                        print(f"从【{img_name}】跳转到【{jump_to_2}】")
-                        logging.info(f"从【{img_name}】跳转到【{jump_to_2}】")
-
-                    if disable_target_2 in self.step_index_map:
-                        target_index = self.step_index_map[disable_target_2]
-                        target_image = list(self.image_list[target_index])
-                        # 仅在目标项未被禁用时更新
-                        if target_image[8] != "禁用":
-                            target_image[8] = "禁用"
-                            self.image_list[target_index] = tuple(target_image)
-                            # 同步更新 TreeView 显示
-                            target_item = self.tree.get_children()[target_index]
-                            values = list(self.tree.item(target_item, 'values'))
-                            values[8] = "禁用"
-                            self.tree.item(target_item, values=tuple(values))
-                            print(f"{disable_target_2} 已被禁用")
+                        if disable_target_2 in self.step_index_map:
+                            target_index = self.step_index_map[disable_target_2]
+                            target_image = list(self.image_list[target_index])
+                            if target_image[8] != "禁用":
+                                target_image[8] = "禁用"
+                                self.image_list[target_index] = tuple(target_image)
+                                target_item = self.tree.get_children()[target_index]
+                                values = list(self.tree.item(target_item, 'values'))
+                                values[8] = "禁用"
+                                self.tree.item(target_item, values=tuple(values))
+                                print(f"{disable_target_2} 已被禁用")
 
                 index += 1
                 self.retry_count = 0
@@ -3191,25 +3203,44 @@ class ImageRecognitionApp:
         遍历 image_list，恢复所有因其他步骤设置【需禁用】而被禁用的目标步骤状态为“启用”，
         并同步更新 TreeView 显示。
         """
-        # 收集所有被引用为 disable_target 的步骤名称（索引 9 和 13）
+        STATUS_INDEX = 8
+        DISABLE_INDEX_1 = 9
+        DISABLE_INDEX_2 = 13
+
+        # 收集所有被引用为 disable_target 的步骤名称
         disable_targets = set()
         for step in self.image_list:
-            if len(step) > 9 and step[9]:
-                disable_targets.add(step[9])
-            if len(step) > 13 and step[13]:
-                disable_targets.add(step[13])
+            if len(step) > DISABLE_INDEX_1 and step[DISABLE_INDEX_1]:
+                disable_targets.add(step[DISABLE_INDEX_1])
+            if len(step) > DISABLE_INDEX_2 and step[DISABLE_INDEX_2]:
+                disable_targets.add(step[DISABLE_INDEX_2])
 
-        # 遍历 image_list，检查那些步骤的名称是否在 disable_targets 内，且当前状态为 "禁用"
+        # 遍历 image_list
         for idx, step in enumerate(self.image_list):
+            step = tuple(step)  # 保证是 tuple
+
+            # 补齐字段，防止索引越界
+            if len(step) < 15:
+                step = step + tuple("" for _ in range(15 - len(step)))
+
             step_name = step[1]
-            if step_name in disable_targets and step[8] == "禁用":
-                updated_step = step[:8] + ("启用", step[9])
-                self.image_list[idx] = updated_step
-                tree_item = self.tree.get_children()[idx]
-                values = list(self.tree.item(tree_item, "values"))
-                values[8] = "启用"
-                self.tree.item(tree_item, values=tuple(values))
-                self.tree.item(tree_item, tags=())
+            status = step[STATUS_INDEX]
+
+            if step_name in disable_targets and status == "禁用":
+                # 重新构造一个新的 tuple，替换掉状态字段
+                step = step[:STATUS_INDEX] + ("启用",) + step[STATUS_INDEX+1:]
+                self.image_list[idx] = step
+
+                # 同步更新 TreeView
+                children = self.tree.get_children()
+                if idx < len(children):
+                    tree_item = children[idx]
+                    values = list(self.tree.item(tree_item, "values"))
+                    if len(values) > STATUS_INDEX:
+                        values[STATUS_INDEX] = "启用"
+                    self.tree.item(tree_item, values=tuple(values))
+                    self.tree.item(tree_item, tags=())  # 移除禁用样式
+
                 print(f"已恢复 {step_name} 的状态为启用")
 
     def retry_until_match(self, img_path, similarity_threshold, wait_time):
@@ -4202,6 +4233,7 @@ class ImageRecognitionApp:
                 self.image_list[selected_index] = new_image
                 self.refresh_listbox_by_current_filter()
                 dialog.destroy()
+                print(mouse_action_result)
 
             except Exception as e:
                 messagebox.showerror("错误", f"保存时出错: {str(e)}", parent=dialog)
@@ -6793,14 +6825,6 @@ class ImageRecognitionApp:
             else:
                 prev_val = self.image_list[selected_index][1]
             cur = cur[:12] + (prev_val,) + cur[13:]
-
-            if cur[4]:
-                parts = str(cur[4]).split(":")
-                parts[0] = "none"
-                cur = cur[:4] + (":".join(parts),) + cur[5:]
-
-            if cur[10]:
-                cur = cur[:10] + ("",) + cur[11:]
 
             return cur
 
