@@ -37,7 +37,7 @@ from ttkbootstrap.widgets import Entry
 from pynput import mouse
 
 #查找tree每个索引的注释请查找：tree索引注释
-CURRENT_VERSION = "v1.3.3" #版本号
+CURRENT_VERSION = "v1.3.4" #版本号
 
 def run_as_admin():
     if ctypes.windll.shell32.IsUserAnAdmin():
@@ -1864,6 +1864,34 @@ class ImageRecognitionApp:
                             lambda e, t=raw: 提示管理器.显示提示(e.widget, t)
                         )
                         lbl.bind("<Leave>", lambda e: 提示管理器.隐藏提示())
+
+            elif 字段名 == "键盘动作":
+                lbl = self.labels[字段名]
+                lbl.unbind("<Enter>")
+                lbl.unbind("<Leave>")
+                
+                # 超长文本快速处理
+                if len(raw) > 150:
+                    disp = raw[:80] + "..."
+                    lbl.config(text=disp)
+                    lbl.bind(
+                        "<Enter>",
+                        lambda e, t=raw: 提示管理器.显示提示(e.widget, t)
+                    )
+                    lbl.bind("<Leave>", lambda e: 提示管理器.隐藏提示())
+                else:
+                    # 正常长度走原有逻辑
+                    max_width = int(self.root.winfo_width() * 3 / 10)
+                    disp = 截断文本(raw, max_width, lbl)  # 使用优化后的二分查找版本
+                    lbl.config(text=disp)
+                    font = tkFont.Font(font=lbl['font'])
+                    if font.measure(raw) > max_width:
+                        lbl.bind(
+                            "<Enter>",
+                            lambda e, t=raw: 提示管理器.显示提示(e.widget, t)
+                        )
+                        lbl.bind("<Leave>", lambda e: 提示管理器.隐藏提示())
+
 
             else:
                 # 其它字段，沿用原有逻辑
