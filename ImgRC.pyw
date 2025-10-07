@@ -37,7 +37,7 @@ from ttkbootstrap.widgets import Entry
 from pynput import mouse
 
 #查找tree每个索引的注释请查找：tree索引注释
-CURRENT_VERSION = "v1.3.4" #版本号
+CURRENT_VERSION = "v1.3.5" #版本号
 
 def run_as_admin():
     if ctypes.windll.shell32.IsUserAnAdmin():
@@ -3164,7 +3164,7 @@ class ImageRecognitionApp:
                     if not match_result and not condition_2:
                         match_result = self.retry_until_match(img_path, similarity_threshold, wait_time)
                     
-                    # ⭐ 重试后再次检查条件1：识图成功
+                    # 重试后再次检查条件1：识图成功
                     if condition == "识图成功" and match_result:
                         if jump_to in self.step_index_map:
                             index = self.step_index_map[jump_to] - 1
@@ -3332,33 +3332,6 @@ class ImageRecognitionApp:
 
         # 执行完毕，清除标志
         self.from_hotkey_flag = False
-   
-    def move_item_up(self, event=None):
-        selected_item = self.tree.selection()   
-        if selected_item:
-            selected_index = self.tree.index(selected_item[0])
-            if selected_index > 0:
-                   
-                self.image_list[selected_index], self.image_list[selected_index - 1] = self.image_list[selected_index - 1], self.image_list[selected_index]
-                self.refresh_listbox_by_current_filter()
-
-                   
-                item_id = self.tree.get_children()[selected_index - 1]
-                self.tree.selection_set(item_id)
-                self.tree.focus(item_id)
-   
-    def move_item_down(self, event=None):
-        selected_item = self.tree.selection()
-        if selected_item:
-            selected_index = self.tree.index(selected_item[0])
-            if selected_index < len(self.image_list) - 1:
-                   
-                self.image_list[selected_index], self.image_list[selected_index + 1] = self.image_list[selected_index + 1], self.image_list[selected_index]
-                self.refresh_listbox_by_current_filter()
-          
-                item_id = self.tree.get_children()[selected_index + 1]
-                self.tree.selection_set(item_id)
-                self.tree.focus(item_id)
 
     # ========== Win32 API 点击相关函数 ==========
     def to_absolute(self, x, y):
@@ -3609,101 +3582,100 @@ class ImageRecognitionApp:
                 
             # 再处理键盘动作
             if keyboard_input:
-                try:      
+                try:
                     print(f"[DEBUG] 解析输入: {keyboard_input}")
                     commands = self.parse_keyboard_input(keyboard_input)
 
                     for cmd in commands:
                         print(f"[DEBUG] 执行命令: {cmd}")
+
                         if isinstance(cmd, tuple) and cmd[0] == "hotkey":
+                            # 组合键
                             keys = cmd[1]
                             print(f"[DEBUG] 发送组合键: {keys}")
                             pyautogui.hotkey(*keys)
-                        elif isinstance(cmd, float):  # 延时
-                            print(f"[DEBUG] 延时 {cmd} 秒")
-                            time.sleep(cmd)
-                        elif isinstance(cmd, tuple) and cmd[0] == "text":  # 纯文本粘贴
+
+                        elif isinstance(cmd, tuple) and cmd[0] == "text":
+                            # 文本粘贴
                             print(f"[DEBUG] 纯文本粘贴: {cmd[1]}")
-                            # 保存原有剪贴板内容
-                            original_clipboard = pyperclip.paste()  
-                            # 将待粘贴内容复制到剪贴板
+                            original_clipboard = pyperclip.paste()
                             pyperclip.copy(cmd[1])
-                            time.sleep(0.1)  # 等待剪贴板更新
-                            pyautogui.hotkey("ctrl", "v")  # 执行粘贴
-                            time.sleep(0.1)  # 粘贴操作后等待确保内容完成传输
-                            # 恢复原有剪贴板内容
+                            pyautogui.hotkey("ctrl", "v")
                             pyperclip.copy(original_clipboard)
                             print("[DEBUG] 剪贴板内容已恢复")
-                        else:  # 普通按键
+
+                        else:
+                            # 单键
                             print(f"[DEBUG] 发送按键: {cmd}")
                             pyautogui.press(cmd)
-                        
-                        time.sleep(0.1)  # 按键间短暂延时
 
                     print(f"[INFO] 执行完成:【{step_name}】， {keyboard_input}")
+
                 except Exception as e:
                     print(f"[ERROR]【{step_name}】， 键盘动作时出错: {e}")
 
-            return True
-        else:
-            print(f"【{step_name}】，最大识图阈值：{max_val:.1f}，期望识图阈值：{similarity_threshold}，执行重新匹配")
-            logging.info(f"【{step_name}】，最大识图阈值：{max_val:.1f}，期望识图阈值：{similarity_threshold}，执行重新匹配")
-            return False
+                return True
+
+            else:
+                print(f"【{step_name}】，最大识图阈值：{max_val:.1f}，期望识图阈值：{similarity_threshold}，执行重新匹配")
+                logging.info(f"【{step_name}】，最大识图阈值：{max_val:.1f}，期望识图阈值：{similarity_threshold}，执行重新匹配")
+                return False
+
    
     def parse_keyboard_input(self, input_str):
-        """解析键盘动作字符串，返回命令列表（调试版）"""
+        """
+        解析键盘动作字符串，返回命令列表（去除延时逻辑）
+        功能：
+            - {ctrl+c} → 组合键
+            - 普通文本自动作为 ("text", ...)
+            - 单键特殊键直接作为字符串
+        """
         commands = []
+        buffer = ""
         i = 0
-        buffer = ""  # 用于收集普通文本
+        length = len(input_str)
 
         print(f"[DEBUG] 开始解析输入: {input_str}")
 
-        while i < len(input_str):
+        while i < length:
             if input_str[i] == '{':
-                # 先把缓冲区的普通文本加入命令列表
+                # 先将缓冲区文本加入命令
                 if buffer:
-                    print(f"[DEBUG] 添加纯文本: {buffer}")
                     commands.append(("text", buffer))
+                    print(f"[DEBUG] 添加纯文本: {buffer}")
                     buffer = ""
 
                 end = input_str.find('}', i)
                 if end != -1:
-                    cmd = input_str[i+1:end]
+                    cmd = input_str[i+1:end].strip()  # 去掉前后空格
                     print(f"[DEBUG] 解析到命令: {cmd}")
 
-                    if cmd.startswith('delay:'):
-                        # 处理延时命令
-                        try:
-                            delay_ms = int(cmd.split(':')[1])
-                            delay_sec = float(delay_ms / 1000)
-                            print(f"[DEBUG] 添加延时: {delay_sec} 秒")
-                            commands.append(delay_sec)
-                        except ValueError:
-                            print(f"[ERROR] 无效的延时值: {cmd}")
-                    elif '+' in cmd:
-                        # 处理组合键
-                        keys = cmd.split('+')
+                    if '+' in cmd:
+                        # 组合键命令
+                        keys = tuple(k.strip() for k in cmd.split('+'))
+                        commands.append(("hotkey", keys))
                         print(f"[DEBUG] 添加组合键: {keys}")
-                        commands.append(("hotkey", tuple(keys)))
                     else:
-                        # 处理特殊键
-                        print(f"[DEBUG] 添加特殊键: {cmd}")
+                        # 单个特殊键或普通按键
                         commands.append(cmd)
+                        print(f"[DEBUG] 添加特殊键/单键: {cmd}")
                     i = end + 1
                     continue
+                else:
+                    # 找不到 }，当作普通文本
+                    buffer += input_str[i]
             else:
                 # 普通字符加入缓冲区
                 buffer += input_str[i]
             i += 1
 
-        # 处理最后一段普通文本
+        # 处理最后的文本缓冲区
         if buffer:
-            print(f"[DEBUG] 添加结尾纯文本: {buffer}")
             commands.append(("text", buffer))
+            print(f"[DEBUG] 添加结尾纯文本: {buffer}")
 
         print(f"[DEBUG] 最终解析的命令: {commands}")
         return commands
-
  
     def add_special_key(self, key):
         current_entry = self.entry.get()
@@ -3822,9 +3794,16 @@ class ImageRecognitionApp:
             def insert_combo_key(letter):
                 if selected_modifiers:
                     combo = "+".join(sorted(selected_modifiers)) + f"+{letter}"
-                    add_special_key(f"{{{combo}}}")
                 else:
-                    add_special_key(letter)
+                    combo = letter
+
+                # 无论单键还是组合键，都加上大括号
+                add_special_key(f"{{{combo}}}")
+
+                # 插入后重置修饰键状态（取消高亮 + 清空记录）
+                for mod_key in selected_modifiers.copy():
+                    selected_modifiers.remove(mod_key)
+                    mod_buttons[mod_key].configure(bootstyle="secondary-outline")
 
                 # 插入后重置修饰键状态（取消高亮 + 清空记录）
                 for mod_key in selected_modifiers.copy():
