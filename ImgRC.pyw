@@ -130,6 +130,7 @@ class ImageRecognitionApp:
         self.canvas = None
         self.running = False  # 控制脚本是否在运行
         self.thread = None  # 用于保存线程
+        self.registered_hotkeys = {}  # 用于存储已注册热键及回调
         self.hotkey = 'F9'  # 开始/停止热键
         self.screenshot_hotkey = "F8"    # 截图热键
         self.record_hotkey = "Ctrl+F8"   # 录制热键
@@ -215,7 +216,7 @@ class ImageRecognitionApp:
         self.create_context_menu()
         atexit.register(self.cleanup_on_exit)
         self.hotkey_id = None # 初始化热键id
-        self.register_global_hotkey() # 注册全局热键  
+        self.apply_hotkey_preferences() # 注册全局热键  
         self.load_last_used_config() #加载上次的配置文件
 
     def init_ui(self):
@@ -1918,100 +1919,156 @@ class ImageRecognitionApp:
         # 清空配置文件名（同一行）
         self.label_filename.config(text="")
 
-    def register_global_hotkey(self):
+    def register_main_hotkey(self):
         try:
-            import os, json
-
-            # 配置文件路径
-            config_dir = os.path.join(os.getcwd(), "app_config")
-            config_file = os.path.join(config_dir, "app.json")
-            enable_hotkey = True  # 默认启用
-            exclude_f9 = False
-
-            if os.path.exists(config_file):
-                try:
-                    with open(config_file, "r", encoding="utf-8") as f:
-                        config = json.load(f)
-                        enable_hotkey = config.get("hotkey_enabled", True)
-                        exclude_f9 = config.get("exclude_f9_hotkey", False)
-                except Exception as e:
-                    print(f"读取配置文件失败，默认启用快捷键: {e}")
-                    enable_hotkey = True
-
-            # 始终注册 F9，如果勾选
-            if exclude_f9:
-                try:
-                    keyboard.add_hotkey("f9", lambda: self.root.after(0, self.toggle_script))
-                except:
-                    pass
-
-            if not enable_hotkey:
-                print("全局快捷键未启用，跳过注册")
-                logging.info("全局快捷键未启用，跳过注册")
-                return  # 不注册其他热键
-
             # 注册开始/停止热键
             def main_hotkey_callback():
                 self.from_hotkey_flag = True
                 self.root.after(0, self.toggle_script)
-
+                
             main_hotkey_str = self.hotkey.replace('<', '').replace('>', '').lower()
             keyboard.add_hotkey(main_hotkey_str, main_hotkey_callback)
-
+            
             # 注册截图热键
             def screenshot_hotkey_callback():
                 self.root.after(0, self.prepare_capture_screenshot)
+                
+            keyboard.add_hotkey(self.screenshot_hotkey, screenshot_hotkey_callback)
+
+        except Exception as e:
+            print(f"注册热键失败: {e}")
+            logging.error(f"热键注册失败: {e}")
+
+    def unregister_main_hotkey(self):
+        try:
+            # 注销热键
+            main_hotkey_str = self.hotkey.replace('<', '').replace('>', '').lower()
+            keyboard.remove_hotkey(main_hotkey_str)
+
+        except Exception as e:
+            print(f"注销全局热键出错：{e}")
+            logging.error(f"热键注销失败: {e}")
+
+    def register_global_hotkey(self):
+        try:
+            # 注册截图热键
+            def screenshot_hotkey_callback():
+                self.root.after(0, self.prepare_capture_screenshot)
+                
             keyboard.add_hotkey(self.screenshot_hotkey, screenshot_hotkey_callback)
 
             # 注册录制热键
             def record_hotkey_callback():
                 self.from_record_hotkey_flag = True
                 self.root.after(0, self.toggle_record)
+                
             keyboard.add_hotkey(self.record_hotkey, record_hotkey_callback)
 
             # 注册重新截图热键
             def retake_image_hotkey_callback():
                 self.root.after(0, self.retake_screenshot)
+                
             keyboard.add_hotkey(self.retake_image_hotkey, retake_image_hotkey_callback)
 
-            # 注册更改点击位置热键
+            # 注册更改点击点击位置热键
             def change_coodr_hotkey_callback():
                 self.root.after(0, self.get_mouse_position)
+                
             keyboard.add_hotkey(self.change_coodr_hotkey, change_coodr_hotkey_callback)
-
+            
             # 日志记录
             print("-" * 85)
             logging.info("-" * 85)
             logging.info("程序启动")
-
+            
         except Exception as e:
             print(f"注册热键失败: {e}")
             logging.error(f"热键注册失败: {e}")
 
-
     def unregister_global_hotkey(self):
         try:
-            main_hotkey_str = self.hotkey.replace('<', '').replace('>', '').lower()
-            keyboard.remove_hotkey(main_hotkey_str)
             keyboard.remove_hotkey(self.screenshot_hotkey)
             keyboard.remove_hotkey(self.record_hotkey)
             keyboard.remove_hotkey(self.retake_image_hotkey)
             keyboard.remove_hotkey(self.change_coodr_hotkey)
-            keyboard.remove_hotkey("f9")  # 注销 F9
+            
         except Exception as e:
             print(f"注销全局热键出错：{e}")
             logging.error(f"热键注销失败: {e}")
 
-    def preferences(self):
-        import os, json, tkinter as tk
-        from tkinter import messagebox
+    def apply_hotkey_preferences(self):
+        """根据 app.json 中的配置决定注册或注销热键"""
+        config_dir = os.path.join(os.getcwd(), "app_config")
+        config_file = os.path.join(config_dir, "app.json")
 
+        # 确保配置目录存在
+        os.makedirs(config_dir, exist_ok=True)
+
+        # 默认配置
+        default_config = {
+            "hotkey_enabled": True,
+            "exclude_f9_hotkey": True
+        }
+
+        # 检查配置文件是否存在
+        if not os.path.exists(config_file):
+            try:
+                with open(config_file, "w", encoding="utf-8") as f:
+                    json.dump(default_config, f, indent=4)
+                logging.info("未找到配置文件，已创建默认 app.json。")
+            except Exception as e:
+                logging.error(f"创建默认配置失败: {e}")
+                print(f"创建默认配置失败: {e}")
+                return
+
+            # 创建后使用默认配置注册热键
+            self.register_global_hotkey()
+            self.register_main_hotkey()
+            logging.info("使用默认配置注册全局热键与主热键。")
+            return
+
+        # 读取现有配置
+        try:
+            with open(config_file, "r", encoding="utf-8") as f:
+                config = json.load(f)
+        except Exception as e:
+            logging.error(f"读取配置失败: {e}")
+            print(f"读取配置失败: {e}")
+            return
+
+        # 读取配置项
+        enabled = config.get("hotkey_enabled", True)
+        exclude_f9 = config.get("exclude_f9_hotkey", False)
+
+        # 根据配置执行逻辑
+        if enabled:
+            # 启用：注册全部热键
+            self.register_global_hotkey()
+            self.register_main_hotkey()
+            logging.info("热键已启用：注册全局热键与主热键。")
+
+        else:
+            # 关闭状态
+            if not exclude_f9:
+                # 未勾选排除 F9 → 注销全部
+                self.unregister_global_hotkey()
+                self.unregister_main_hotkey()
+                logging.info("热键已关闭：注销全局热键与主热键。")
+            else:
+                # 勾选排除 F9 → 只注销全局热键
+                self.unregister_global_hotkey()
+                self.unregister_main_hotkey()
+                self.register_main_hotkey()
+                logging.info("热键已关闭（排除 F9）：仅注销全局热键。")
+
+
+    def preferences(self):
         # 确保配置文件存在
         config_dir = os.path.join(os.getcwd(), "app_config")
         os.makedirs(config_dir, exist_ok=True)
         config_file = os.path.join(config_dir, "app.json")
 
-        default_config = {"hotkey_enabled": True, "exclude_f9_hotkey": False}
+        default_config = {"hotkey_enabled": True, "exclude_f9_hotkey": True}
 
         if os.path.exists(config_file):
             try:
@@ -2107,13 +2164,27 @@ class ImageRecognitionApp:
         checkbox_frame = tk.Frame(panels["快捷键"], bg="white")
         checkbox_frame.pack(anchor="w", fill="x", pady=(0, 20))
 
-        exclude_f9_var = tk.BooleanVar(value=config.get("exclude_f9_hotkey", False))
-        tk.Checkbutton(
+        exclude_f9_var = tk.BooleanVar(value=config.get("exclude_f9_hotkey", True))
+        exclude_checkbox = tk.Checkbutton(
             checkbox_frame,
             text="始终启用【开始/停止】快捷键【F9】",
             variable=exclude_f9_var,
             bg="white"
-        ).pack(anchor="w")
+        )
+        exclude_checkbox.pack(anchor="w")
+
+        # 控制复选框显示/隐藏的函数
+        def update_checkbox_visibility(*args):
+            if hotkey_var.get() == "启用":
+                checkbox_frame.pack_forget()
+            else:
+                checkbox_frame.pack(anchor="w", fill="x", pady=(0, 20))
+
+        # 绑定单选按钮变化事件
+        hotkey_var.trace("w", update_checkbox_visibility)
+        
+        # 初始化复选框状态
+        update_checkbox_visibility()
 
         # 底部按钮容器
         button_container = tk.Frame(panels["快捷键"], bg="white")
@@ -2127,8 +2198,17 @@ class ImageRecognitionApp:
 
         def save_preferences():
             enabled = hotkey_var.get() == "启用"
+            exclude_f9 = exclude_f9_var.get()
+
+            # 原配置对比
+            old_enabled = config.get("hotkey_enabled", True)
+            old_exclude_f9 = config.get("exclude_f9_hotkey", False)
+
+            # 更新配置
             config["hotkey_enabled"] = enabled
-            config["exclude_f9_hotkey"] = exclude_f9_var.get()
+            config["exclude_f9_hotkey"] = exclude_f9
+
+            # 保存配置文件
             try:
                 with open(config_file, "w", encoding="utf-8") as f:
                     json.dump(config, f, indent=4)
@@ -2136,14 +2216,11 @@ class ImageRecognitionApp:
                 messagebox.showerror("错误", f"保存配置失败: {e}")
                 return
 
-            if enabled:
-                self.register_global_hotkey()
-            else:
-                self.unregister_global_hotkey()
+            # 仅在选项有更改时执行热键逻辑
+            if enabled != old_enabled or exclude_f9 != old_exclude_f9:
+                self.apply_hotkey_preferences()
 
-            if exclude_f9_var.get():
-                keyboard.add_hotkey("f9", lambda: self.root.after(0, self.toggle_script))
-
+            # 关闭首选项窗口
             pref_window.destroy()
 
         def cancel_preferences():
@@ -2182,7 +2259,7 @@ class ImageRecognitionApp:
         pref_window.deiconify()
         pref_window.iconbitmap("icon/app.ico")
 
- 
+
     def prepare_capture_screenshot(self, event=None):
         if self.need_disable_drag:
             messagebox.showinfo("提示","请先清除搜索框内容！")
