@@ -2044,6 +2044,7 @@ class ImageRecognitionApp:
         if enabled:
             # 启用：注册全部热键
             self.register_global_hotkey()
+            self.unregister_main_hotkey()
             self.register_main_hotkey()
             logging.info("热键已启用：注册全局热键与主热键。")
 
