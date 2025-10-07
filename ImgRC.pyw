@@ -387,7 +387,7 @@ class ImageRecognitionApp:
 
         # 初始化菜单对象
         self.menu_popup = tk.Menu(self.root, tearoff=0)
-        # self.menu_popup.add_command(label="首选项", command=self.show_logs)
+        self.menu_popup.add_command(label="首选项", command=self.preferences)
         self.menu_popup.add_command(label="查看日志", command=self.show_logs)
         self.menu_popup.add_command(label="检查更新", command=self.check_update)
 
@@ -1920,61 +1920,268 @@ class ImageRecognitionApp:
 
     def register_global_hotkey(self):
         try:
+            import os, json
+
+            # 配置文件路径
+            config_dir = os.path.join(os.getcwd(), "app_config")
+            config_file = os.path.join(config_dir, "app.json")
+            enable_hotkey = True  # 默认启用
+            exclude_f9 = False
+
+            if os.path.exists(config_file):
+                try:
+                    with open(config_file, "r", encoding="utf-8") as f:
+                        config = json.load(f)
+                        enable_hotkey = config.get("hotkey_enabled", True)
+                        exclude_f9 = config.get("exclude_f9_hotkey", False)
+                except Exception as e:
+                    print(f"读取配置文件失败，默认启用快捷键: {e}")
+                    enable_hotkey = True
+
+            # 始终注册 F9，如果勾选
+            if exclude_f9:
+                try:
+                    keyboard.add_hotkey("f9", lambda: self.root.after(0, self.toggle_script))
+                except:
+                    pass
+
+            if not enable_hotkey:
+                print("全局快捷键未启用，跳过注册")
+                logging.info("全局快捷键未启用，跳过注册")
+                return  # 不注册其他热键
+
             # 注册开始/停止热键
             def main_hotkey_callback():
                 self.from_hotkey_flag = True
                 self.root.after(0, self.toggle_script)
-                
+
             main_hotkey_str = self.hotkey.replace('<', '').replace('>', '').lower()
             keyboard.add_hotkey(main_hotkey_str, main_hotkey_callback)
-            
+
             # 注册截图热键
             def screenshot_hotkey_callback():
                 self.root.after(0, self.prepare_capture_screenshot)
-                
             keyboard.add_hotkey(self.screenshot_hotkey, screenshot_hotkey_callback)
 
             # 注册录制热键
             def record_hotkey_callback():
                 self.from_record_hotkey_flag = True
                 self.root.after(0, self.toggle_record)
-                
             keyboard.add_hotkey(self.record_hotkey, record_hotkey_callback)
 
             # 注册重新截图热键
             def retake_image_hotkey_callback():
                 self.root.after(0, self.retake_screenshot)
-                
             keyboard.add_hotkey(self.retake_image_hotkey, retake_image_hotkey_callback)
 
-            # 注册更改点击点击位置热键
+            # 注册更改点击位置热键
             def change_coodr_hotkey_callback():
                 self.root.after(0, self.get_mouse_position)
-                
             keyboard.add_hotkey(self.change_coodr_hotkey, change_coodr_hotkey_callback)
-            
+
             # 日志记录
             print("-" * 85)
             logging.info("-" * 85)
             logging.info("程序启动")
-            
+
         except Exception as e:
             print(f"注册热键失败: {e}")
             logging.error(f"热键注册失败: {e}")
 
+
     def unregister_global_hotkey(self):
         try:
-            # 注销热键
             main_hotkey_str = self.hotkey.replace('<', '').replace('>', '').lower()
             keyboard.remove_hotkey(main_hotkey_str)
             keyboard.remove_hotkey(self.screenshot_hotkey)
             keyboard.remove_hotkey(self.record_hotkey)
             keyboard.remove_hotkey(self.retake_image_hotkey)
             keyboard.remove_hotkey(self.change_coodr_hotkey)
-            
+            keyboard.remove_hotkey("f9")  # 注销 F9
         except Exception as e:
             print(f"注销全局热键出错：{e}")
             logging.error(f"热键注销失败: {e}")
+
+    def preferences(self):
+        import os, json, tkinter as tk
+        from tkinter import messagebox
+
+        # 确保配置文件存在
+        config_dir = os.path.join(os.getcwd(), "app_config")
+        os.makedirs(config_dir, exist_ok=True)
+        config_file = os.path.join(config_dir, "app.json")
+
+        default_config = {"hotkey_enabled": True, "exclude_f9_hotkey": False}
+
+        if os.path.exists(config_file):
+            try:
+                with open(config_file, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+            except Exception:
+                config = default_config
+        else:
+            config = default_config
+            with open(config_file, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=4)
+
+        # 创建对话框
+        pref_window = tk.Toplevel(self.root)
+        pref_window.withdraw()
+        pref_window.title("首选项")
+        pref_window.transient(self.root)
+        pref_window.grab_set()
+
+        # 左侧菜单
+        menu_frame = tk.Frame(pref_window, width=120, bg="#f0f0f0")
+        menu_frame.pack(side="left", fill="y")
+        menu_frame.pack_propagate(False)
+
+        # 分隔线
+        separator = tk.Canvas(pref_window, width=1, bg="#f0f0f0", highlightthickness=0)
+        separator.pack(side="left", fill="y", pady=5)
+
+        # 画线，留出上下间距 10 像素
+        separator.create_line(1, 5, 1, 1000-5, fill="#d3d3d3", width=2)
+
+        # 右侧内容
+        content_frame = tk.Frame(pref_window, width=350, bg="white")
+        content_frame.pack(side="right", fill="both", expand=True)
+
+        panels = {}
+        buttons = {}
+
+        # 切换面板
+        def show_panel(panel_name):
+            for child in content_frame.winfo_children():
+                child.pack_forget()
+            panels[panel_name].pack(fill="both", expand=True, padx=20, pady=20)
+
+        # 菜单按钮
+        buttons["快捷键"] = tk.Button(
+            menu_frame,
+            text="快捷键",
+            width=12,
+            bg="#f0f0f0",
+            relief="flat",
+            anchor="w",
+            padx=15,
+            command=lambda: show_panel("快捷键")
+        )
+        buttons["快捷键"].pack(pady=(15, 5), padx=5, fill="x")
+
+        # 快捷键面板
+        panels["快捷键"] = tk.Frame(content_frame, bg="white")
+
+        # 标题
+        title_label = tk.Label(
+            panels["快捷键"],
+            text="全局热键设置",
+            font=("微软雅黑", 11, "bold"),
+            bg="white"
+        )
+        title_label.pack(anchor="w", pady=(0, 15))
+
+        # 单选按钮容器
+        option_frame = tk.Frame(panels["快捷键"], bg="white")
+        option_frame.pack(anchor="w", fill="x", pady=(0, 10))
+
+        hotkey_var = tk.StringVar(value="启用" if config.get("hotkey_enabled", True) else "关闭")
+
+        tk.Radiobutton(
+            option_frame,
+            text="启用",
+            variable=hotkey_var,
+            value="启用",
+            bg="white"
+        ).pack(anchor="w", pady=(0,5))
+
+        tk.Radiobutton(
+            option_frame,
+            text="关闭",
+            variable=hotkey_var,
+            value="关闭",
+            bg="white"
+        ).pack(anchor="w", pady=(0,10))
+
+        # 复选框容器
+        checkbox_frame = tk.Frame(panels["快捷键"], bg="white")
+        checkbox_frame.pack(anchor="w", fill="x", pady=(0, 20))
+
+        exclude_f9_var = tk.BooleanVar(value=config.get("exclude_f9_hotkey", False))
+        tk.Checkbutton(
+            checkbox_frame,
+            text="始终启用【开始/停止】快捷键【F9】",
+            variable=exclude_f9_var,
+            bg="white"
+        ).pack(anchor="w")
+
+        # 底部按钮容器
+        button_container = tk.Frame(panels["快捷键"], bg="white")
+        button_container.pack(side="bottom", fill="x", pady=(20, 0))
+
+        separator_line = tk.Frame(button_container, height=1, bg="#e0e0e0")
+        separator_line.pack(fill="x", pady=(0, 15))
+
+        button_frame = tk.Frame(button_container, bg="white")
+        button_frame.pack(anchor="e")
+
+        def save_preferences():
+            enabled = hotkey_var.get() == "启用"
+            config["hotkey_enabled"] = enabled
+            config["exclude_f9_hotkey"] = exclude_f9_var.get()
+            try:
+                with open(config_file, "w", encoding="utf-8") as f:
+                    json.dump(config, f, indent=4)
+            except Exception as e:
+                messagebox.showerror("错误", f"保存配置失败: {e}")
+                return
+
+            if enabled:
+                self.register_global_hotkey()
+            else:
+                self.unregister_global_hotkey()
+
+            if exclude_f9_var.get():
+                keyboard.add_hotkey("f9", lambda: self.root.after(0, self.toggle_script))
+
+            pref_window.destroy()
+
+        def cancel_preferences():
+            pref_window.destroy()
+
+        save_button = ttk.Button(
+            button_frame, 
+            text="保存", 
+            command=save_preferences,
+            bootstyle="primary-outline"  
+        )
+        save_button.pack(side=tk.RIGHT, padx=5)
+
+        cancel_button = ttk.Button(
+            button_frame, 
+            text="取消", 
+            command=cancel_preferences,
+            bootstyle="primary-outline"  
+        )
+        cancel_button.pack(side=tk.RIGHT, padx=5)
+
+        # 初始显示
+        show_panel("快捷键")
+
+        # 窗口最小尺寸与居中
+        min_width, min_height = 480, 320
+        pref_window.update_idletasks()
+        main_x = self.root.winfo_x()
+        main_y = self.root.winfo_y()
+        main_w = self.root.winfo_width()
+        main_h = self.root.winfo_height()
+        x = main_x + (main_w - min_width) // 2
+        y = main_y + (main_h - min_height) // 2
+        pref_window.geometry(f"{min_width}x{min_height}+{x}+{y}")
+        pref_window.minsize(min_width, min_height)
+        pref_window.deiconify()
+        pref_window.iconbitmap("icon/app.ico")
+
  
     def prepare_capture_screenshot(self, event=None):
         if self.need_disable_drag:
